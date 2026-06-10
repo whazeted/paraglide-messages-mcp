@@ -1,15 +1,15 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { TranslationService } from "./service.js";
-import { registerTools } from "./tools.js";
-import { registerPrompts } from "./prompts.js";
-import { registerResources } from "./resources.js";
+import { TranslationService } from "./core/service.js";
+import { registerTools } from "./primitives/tools.js";
+import { registerPrompts } from "./primitives/prompts.js";
+import { registerResources } from "./primitives/resources.js";
 
 export const SERVER_VERSION = "0.1.0";
 
 /**
- * Creates the MCP server for the inlang project at `projectPath`. The
- * translation tools live in tools.ts, the workflow prompts in prompts.ts,
- * the read-only resources in resources.ts; all operate on the same
+ * Creates the MCP server for the inlang project at `projectPath`. The MCP
+ * surface (tools, prompts, resources) lives in primitives/, the translation
+ * domain logic in core/; all primitives operate on the same
  * TranslationService.
  */
 export function createServer(projectPath: string): McpServer {

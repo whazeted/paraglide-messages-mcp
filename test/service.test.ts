@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { TranslationService } from "../src/service.js";
-import { discoverProjectPath } from "../src/project.js";
+import { TranslationService } from "../src/core/service.js";
+import { discoverProjectPath } from "../src/core/project.js";
 import { createFixtureProject, removeFixture } from "./helpers.js";
 
 let fixture: ReturnType<typeof createFixtureProject>;

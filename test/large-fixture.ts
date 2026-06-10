@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ComplexMessage, MessageValue } from "../src/types.js";
+import type { ComplexMessage, MessageValue } from "../src/core/types.js";
 import { generateKey, generateMessage, mulberry32 } from "./generate-messages.js";
 import {
 	MESSAGE_FILE_SCHEMA,

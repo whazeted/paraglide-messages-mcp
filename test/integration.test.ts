@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { TranslationService } from "../src/service.js";
-import type { MessageValue } from "../src/types.js";
+import { TranslationService } from "../src/core/service.js";
+import type { MessageValue } from "../src/core/types.js";
 import { removeFixture } from "./helpers.js";
 import {
 	createLargeFixtureProject,

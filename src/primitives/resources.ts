@@ -2,7 +2,7 @@ import {
 	type McpServer,
 	ResourceTemplate,
 } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { TranslationService } from "./service.js";
+import type { TranslationService } from "../core/service.js";
 
 /**
  * Registers the read-only resources. They mirror what the read tools return,

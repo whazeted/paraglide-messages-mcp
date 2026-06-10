@@ -5,8 +5,8 @@ import {
 	isValidMessageValue,
 	placeholdersOf,
 	validateTranslation,
-} from "../src/format.js";
-import type { ComplexMessage } from "../src/types.js";
+} from "../src/core/format.js";
+import type { ComplexMessage } from "../src/core/types.js";
 
 describe("extractPlaceholders", () => {
 	it("extracts variable placeholders", () => {

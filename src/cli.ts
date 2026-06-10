@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { discoverProjectPath } from "./project.js";
+import { discoverProjectPath } from "./core/project.js";
 import { createServer, SERVER_VERSION } from "./server.js";
 
 const HELP = `paraglide-mcp ${SERVER_VERSION}

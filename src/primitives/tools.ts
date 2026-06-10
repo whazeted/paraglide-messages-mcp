@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { TranslationService } from "./service.js";
-import type { TranslationInput } from "./types.js";
+import type { TranslationService } from "../core/service.js";
+import type { TranslationInput } from "../core/types.js";
 
 const variantSchema = z.object({
 	declarations: z.array(z.string()).optional(),
