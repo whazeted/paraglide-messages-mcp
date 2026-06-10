@@ -175,11 +175,16 @@ pnpm install
 pnpm test        # unit + integration tests (no build needed)
 pnpm test:e2e    # builds, then drives the real CLI over stdio MCP
 pnpm test:all    # everything
+pnpm bench       # performance benchmark (see PERFORMANCE.md)
 pnpm build
 ```
 
 Integration and e2e tests run against a real inlang project fixture on disk
 using the actual `@inlang/sdk` — no mocks.
+
+Message-format projects are read and written directly as JSON instead of
+through the SDK's load/save cycle — see [PERFORMANCE.md](PERFORMANCE.md) for
+the measurements and rationale.
 
 ### Releasing
 

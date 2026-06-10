@@ -41,9 +41,10 @@
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",
 		"typecheck": "tsc --noEmit",
-		"test": "vitest run --exclude 'test/e2e.test.ts'",
+		"test": "vitest run --exclude 'test/e2e.test.ts' --exclude 'test/benchmark.test.ts'",
 		"test:e2e": "pnpm build && vitest run test/e2e.test.ts",
-		"test:all": "pnpm build && vitest run",
+		"test:all": "pnpm build && vitest run --exclude 'test/benchmark.test.ts'",
+		"bench": "vitest run test/benchmark.test.ts",
 		"prepublishOnly": "pnpm build"
 	},
 	"dependencies": {
