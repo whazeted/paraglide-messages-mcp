@@ -33,7 +33,9 @@ export type LocaleMessages = Record<string, MessageValue>;
 /** Flat map of locale -> messages. */
 export type MessagesSnapshot = Record<string, LocaleMessages>;
 
-export interface ProjectInfo {
+// type alias (not interface) so it satisfies the MCP SDK's
+// Record<string, unknown> constraint on structuredContent
+export type ProjectInfo = {
 	projectPath: string;
 	baseLocale: string;
 	locales: string[];
@@ -43,7 +45,7 @@ export interface ProjectInfo {
 	translated: Record<string, number>;
 	/** per locale: number of keys missing or empty */
 	missing: Record<string, number>;
-}
+};
 
 export interface TranslationItem {
 	key: string;

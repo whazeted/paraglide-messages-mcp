@@ -40,8 +40,8 @@ afterAll(async () => {
 async function callTool<T>(name: string, args: Record<string, unknown>): Promise<T> {
 	const result = await client.callTool({ name, arguments: args });
 	expect(result.isError ?? false).toBe(false);
-	const content = result.content as Array<{ type: string; text: string }>;
-	return JSON.parse(content[0]!.text) as T;
+	expect(result.structuredContent).toBeDefined();
+	return result.structuredContent as T;
 }
 
 describe("paraglide-mcp end to end", () => {
@@ -54,6 +54,10 @@ describe("paraglide-mcp end to end", () => {
 			"project_info",
 			"save_translations",
 		]);
+		for (const tool of tools) {
+			expect(tool.outputSchema, `${tool.name} outputSchema`).toBeDefined();
+			expect(tool.outputSchema?.type).toBe("object");
+		}
 	});
 
 	it("reports project info", async () => {
@@ -148,5 +152,54 @@ describe("paraglide-mcp end to end", () => {
 			arguments: { targetLocale: "xx" },
 		});
 		expect(result.isError).toBe(true);
+	});
+
+	it("exposes the three workflow prompts", async () => {
+		const { prompts } = await client.listPrompts();
+		expect(prompts.map((p) => p.name).sort()).toEqual([
+			"review_locale",
+			"translate_locale",
+			"translate_prefix",
+		]);
+		const translatePrefix = prompts.find((p) => p.name === "translate_prefix");
+		expect(
+			translatePrefix?.arguments?.find((a) => a.name === "targetLocale")
+				?.required
+		).toBe(true);
+		expect(
+			translatePrefix?.arguments?.find((a) => a.name === "sourceLocale")
+				?.required
+		).toBeFalsy();
+	});
+
+	it("renders translate_prefix with the given arguments", async () => {
+		const result = await client.getPrompt({
+			name: "translate_prefix",
+			arguments: { prefix: "checkout_", targetLocale: "fr" },
+		});
+		expect(result.messages).toHaveLength(1);
+		expect(result.messages[0]?.role).toBe("user");
+		const text =
+			result.messages[0]?.content.type === "text"
+				? result.messages[0].content.text
+				: "";
+		expect(text).toContain('prefix: "checkout_"');
+		expect(text).toContain('targetLocale: "fr"');
+		expect(text).toContain("get_translation_batch");
+		expect(text).toContain("save_translations");
+	});
+
+	it("completes locale and prefix prompt arguments from the project", async () => {
+		const locales = await client.complete({
+			ref: { type: "ref/prompt", name: "translate_locale" },
+			argument: { name: "targetLocale", value: "d" },
+		});
+		expect(locales.completion.values).toEqual(["de"]);
+
+		const prefixes = await client.complete({
+			ref: { type: "ref/prompt", name: "review_locale" },
+			argument: { name: "prefix", value: "checkout_" },
+		});
+		expect(prefixes.completion.values).toContain("checkout_title");
 	});
 });

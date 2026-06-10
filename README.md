@@ -48,6 +48,21 @@ copy of the message-format plugin is used as a fallback.
 | `get_translation_batch` | The next *N* untranslated messages for a target locale (default 5, max 25), with source text, required placeholders, and a `remaining` counter. |
 | `save_translations` | Validate and persist translations for one locale (max 25 per call). Per-item results; valid items are saved even when others fail. |
 
+## Prompts
+
+The server also exposes the common workflows as MCP prompts, so clients that
+support prompts (e.g. `/mcp__paraglide__translate_locale` in Claude Code) can
+launch them directly without the bundled skill:
+
+| Prompt | Arguments | Purpose |
+| --- | --- | --- |
+| `translate_locale` | `targetLocale`, `sourceLocale?` | Translate all missing messages into one locale via the batch loop. |
+| `translate_prefix` | `prefix`, `targetLocale`, `sourceLocale?` | Same loop, scoped to keys starting with `prefix`. |
+| `review_locale` | `locale`, `prefix?` | Review existing translations against the base locale and fix problems. |
+
+Locale and prefix arguments support MCP completion: locales are suggested from
+the project settings, prefixes from the actual message keys.
+
 ### The translation loop
 
 Agents translate iteratively — small batches keep the error rate low while
