@@ -3,6 +3,16 @@
 	"version": "0.1.0",
 	"description": "MCP server for translating Paraglide JS / inlang projects in small, low-error batches",
 	"license": "MIT",
+	"mcpName": "io.github.weshaze/paraglide-mcp",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/WesHaze/paraglide-mcp.git"
+	},
+	"publishConfig": {
+		"access": "public",
+		"provenance": true
+	},
+	"packageManager": "pnpm@10.33.2",
 	"type": "module",
 	"engines": {
 		"node": ">=20.0.0"

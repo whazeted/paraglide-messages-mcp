@@ -140,8 +140,28 @@ legitimately drop variables in some variants.
 ## Agent skill
 
 `skill/paraglide-translation/` contains an installable skill that teaches an
-agent the batch workflow, plural-rule handling, and error recovery. For
-Claude Code, copy it into your project or user skills directory:
+agent the batch workflow, plural-rule handling, and error recovery. It uses
+the open [Agent Skills](https://agentskills.io) format, so it works with any
+agent that supports `SKILL.md` (Claude Code, Codex, Cursor, Copilot, Gemini
+CLI, ...).
+
+**Claude Code** — install the plugin, which bundles both the MCP server and
+the skill (no `.mcp.json` needed):
+
+```
+/plugin marketplace add WesHaze/paraglide-mcp
+/plugin install paraglide-translation@paraglide-mcp
+```
+
+**Any other agent** — install the skill with the [skills CLI](https://github.com/vercel-labs/skills)
+(it picks the right directory for your agent), then configure the MCP server
+as shown in Quick start:
+
+```sh
+npx skills add WesHaze/paraglide-mcp
+```
+
+Or copy it manually:
 
 ```sh
 cp -r node_modules/paraglide-mcp/skill/paraglide-translation .claude/skills/
@@ -160,6 +180,30 @@ pnpm build
 
 Integration and e2e tests run against a real inlang project fixture on disk
 using the actual `@inlang/sdk` — no mocks.
+
+### Releasing
+
+Releases are automated: pushing a `v*` tag runs
+[release.yml](.github/workflows/release.yml), which tests, publishes to npm
+via [trusted publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC —
+no token secrets), and syncs the version to the official
+[MCP Registry](https://registry.modelcontextprotocol.io).
+
+One-time setup before the first tagged release:
+
+1. Publish the first version locally (`pnpm build && npm publish`) — npm only
+   lets you configure a trusted publisher for a package that already exists.
+2. On npmjs.com → package → Settings, add a GitHub Actions trusted publisher:
+   org `WesHaze`, repository `paraglide-mcp`, workflow filename `release.yml`.
+3. Set publishing access to "Require two-factor authentication and disallow
+   tokens".
+
+Then release with:
+
+```sh
+npm version patch   # bumps package.json, commits, tags
+git push --follow-tags
+```
 
 ## Requirements
 
