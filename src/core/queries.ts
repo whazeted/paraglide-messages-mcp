@@ -1,4 +1,12 @@
 import { isEmptyValue, placeholdersOf } from "./format.js";
+import {
+	DEFAULT_BATCH_SIZE,
+	DEFAULT_KEYS_LIMIT,
+	DEFAULT_MESSAGES_LIMIT,
+	MAX_BATCH_SIZE,
+	MAX_KEYS_LIMIT,
+	MAX_MESSAGES_LIMIT,
+} from "./constants.js";
 import { collectKeys, type ProjectSnapshot } from "./storage.js";
 import type { MessageValue, ProjectInfo, TranslationItem } from "./types.js";
 
@@ -74,7 +82,7 @@ export function queryKeys(
 	if (args.after) {
 		keys = keys.filter((key) => key > args.after!);
 	}
-	const limit = clamp(args.limit ?? 100, 1, 500);
+	const limit = clamp(args.limit ?? DEFAULT_KEYS_LIMIT, 1, MAX_KEYS_LIMIT);
 	const page = keys.slice(0, limit);
 	const hasMore = keys.length > limit;
 
@@ -119,7 +127,11 @@ export function queryMessages(
 			.sort();
 	}
 
-	const limit = clamp(args.limit ?? 50, 1, 200);
+	const limit = clamp(
+		args.limit ?? DEFAULT_MESSAGES_LIMIT,
+		1,
+		MAX_MESSAGES_LIMIT
+	);
 	const truncated = keys.length > limit;
 	keys = keys.slice(0, limit);
 
@@ -178,7 +190,11 @@ export function nextTranslationBatch(
 		return isEmptyValue(snapshot[targetLocale]?.[key]);
 	});
 
-	const batchSize = clamp(args.batchSize ?? 5, 1, 25);
+	const batchSize = clamp(
+		args.batchSize ?? DEFAULT_BATCH_SIZE,
+		1,
+		MAX_BATCH_SIZE
+	);
 	const items: TranslationItem[] = pending.slice(0, batchSize).map((key) => {
 		const source = snapshot[sourceLocale]![key]!;
 		const existingTarget = snapshot[targetLocale]?.[key];

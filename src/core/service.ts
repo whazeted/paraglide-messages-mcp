@@ -1,3 +1,4 @@
+import { MAX_SAVE_BATCH } from "./constants.js";
 import {
 	computeProjectInfo,
 	nextTranslationBatch,
@@ -87,9 +88,9 @@ export class TranslationService {
 		if (args.translations.length === 0) {
 			throw new Error("translations must not be empty");
 		}
-		if (args.translations.length > 25) {
+		if (args.translations.length > MAX_SAVE_BATCH) {
 			throw new Error(
-				"max 25 translations per call — translate in small batches to keep error rates low"
+				`max ${MAX_SAVE_BATCH} translations per call — translate in small batches to keep error rates low`
 			);
 		}
 		return await createStorage(this.projectPath).update(

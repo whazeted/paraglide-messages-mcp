@@ -39,7 +39,7 @@
 		"translation"
 	],
 	"scripts": {
-		"build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",
+		"build": "tsc -p tsconfig.build.json && node dist/generate-skill.js && chmod +x dist/cli.js",
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run --exclude 'test/e2e.test.ts' --exclude 'test/benchmark.test.ts'",
 		"test:e2e": "pnpm build && vitest run test/e2e.test.ts",

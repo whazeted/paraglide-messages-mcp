@@ -1,5 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import {
+	DEFAULT_BATCH_SIZE,
+	MAX_BATCH_SIZE,
+	MAX_KEYS_LIMIT,
+	MAX_MESSAGES_LIMIT,
+	MAX_SAVE_BATCH,
+} from "../core/constants.js";
 import type { TranslationService } from "../core/service.js";
 import type { TranslationInput } from "../core/types.js";
 
@@ -74,7 +81,7 @@ export function registerTools(
 					.enum(["all", "missing", "translated"])
 					.optional()
 					.describe("filter by translation status in `locale` (default: all)"),
-				limit: z.number().int().min(1).max(500).optional(),
+				limit: z.number().int().min(1).max(MAX_KEYS_LIMIT).optional(),
 				after: z
 					.string()
 					.optional()
@@ -118,7 +125,7 @@ export function registerTools(
 					.array(z.string())
 					.optional()
 					.describe("restrict to these locales (default: all project locales)"),
-				limit: z.number().int().min(1).max(200).optional(),
+				limit: z.number().int().min(1).max(MAX_MESSAGES_LIMIT).optional(),
 			},
 			outputSchema: {
 				messages: z.array(
@@ -146,7 +153,7 @@ export function registerTools(
 				"limited to a key prefix). Returns the source text, required placeholders, and the " +
 				"number of remaining untranslated messages. Workflow: call this, translate the items, " +
 				"save them with save_translations, then call this again until `done` is true. Keep " +
-				"batches small (default 5) — accuracy beats batch size.",
+				`batches small (default ${DEFAULT_BATCH_SIZE}) — accuracy beats batch size.`,
 			inputSchema: {
 				targetLocale: z.string().describe("locale to translate into"),
 				sourceLocale: z
@@ -161,9 +168,9 @@ export function registerTools(
 					.number()
 					.int()
 					.min(1)
-					.max(25)
+					.max(MAX_BATCH_SIZE)
 					.optional()
-					.describe("messages per batch (default 5)"),
+					.describe(`messages per batch (default ${DEFAULT_BATCH_SIZE})`),
 			},
 			outputSchema: {
 				targetLocale: z.string(),
@@ -216,8 +223,10 @@ export function registerTools(
 						})
 					)
 					.min(1)
-					.max(25)
-					.describe("translations to save (max 25 per call — keep batches small)"),
+					.max(MAX_SAVE_BATCH)
+					.describe(
+						`translations to save (max ${MAX_SAVE_BATCH} per call — keep batches small)`
+					),
 				allowNewKeys: z
 					.boolean()
 					.optional()

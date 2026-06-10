@@ -145,6 +145,12 @@ the open [Agent Skills](https://agentskills.io) format, so it works with any
 agent that supports `SKILL.md` (Claude Code, Codex, Cursor, Copilot, Gemini
 CLI, ...).
 
+`SKILL.md` is generated — edit
+[src/skill/SKILL.template.md](src/skill/SKILL.template.md) instead and run
+`pnpm build`. Batch-size guidance is interpolated from
+[src/core/limits.ts](src/core/limits.ts), and a test fails when the committed
+file is out of date.
+
 **Claude Code** — install the plugin, which bundles both the MCP server and
 the skill (no `.mcp.json` needed):
 
