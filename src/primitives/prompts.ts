@@ -94,7 +94,7 @@ export function registerPrompts(
 			title: "Review a locale",
 			description:
 				"Review the existing translations of one locale against the base locale and fix " +
-				"problems (broken placeholders, wrong plural cases, untranslated text, tone).",
+				"problems (broken placeholders, wrong plural cases, untranslated text, style inconsistencies).",
 			argsSchema: {
 				locale: localeArg("locale whose translations to review, e.g. 'de'"),
 				prefix: optionalPrefixArg(
@@ -112,7 +112,8 @@ const TRANSLATION_RULES = `Translation rules:
 - Preserve every {placeholder} exactly as written — same name, same braces. Never translate, rename, or drop placeholders.
 - Preserve markup tags like {#bold}/{/bold} and their nesting.
 - Variant messages are a single-element array: translate only the pattern strings in "match". Keep "declarations" and "selectors" as-is, but add or remove match cases to fit the target language's plural rules.
-- Match the source's tone, formality, and rough length. Prefer the conventional terms of the platform/language over literal translations.
+- Settle on a style before translating — tone, formality level (e.g. formal vs. informal address), and key terminology. Ask the user for preferences when unclear, otherwise define one yourself and state it in your summary.
+- Keep translations roughly the source's length and prefer the conventional terms of the platform/language over literal translations.
 - When a source string is ambiguous, use the message key and sibling keys (get_messages with a prefix) for context. If still ambiguous, make the safest choice and mention it in your summary.
 - Never edit message files directly — always save through save_translations so validation applies.`;
 
@@ -164,7 +165,7 @@ Workflow:
    - every {placeholder} is intact (same names, none added or dropped),
    - markup tags like {#bold}/{/bold} are preserved and correctly nested,
    - variant messages cover the right plural cases for the language,
-   - the text is actually translated (not copied source text) and matches the source's tone and rough length.
+   - the text is actually translated (not copied source text), is roughly the source's length, and is stylistically consistent (one tone, formality level, and terminology across the locale).
 4. Fix problems with save_translations in small batches (max 25 per call) and check \`results\` for per-item errors.
 5. Report a summary: how many messages you reviewed, how many you fixed and why, and anything ambiguous you left unchanged.
 

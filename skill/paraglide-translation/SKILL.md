@@ -13,7 +13,8 @@ translate everything in one call.
 
 1. **`project_info`** — learn the base locale, target locales, and how many
    messages are missing per locale. Confirm with the user which locale(s) and
-   (optionally) which key prefix to work on if not already specified.
+   (optionally) which key prefix to work on if not already specified, along
+   with any style preferences (tone, formality, terminology).
 2. Loop until `done` is true:
    a. **`get_translation_batch`** with `targetLocale` (and `prefix` if
       scoping). Keep the default `batchSize` of 5; use up to 10 only for very
@@ -58,9 +59,11 @@ context or when you only need to inspect state, not change it.
 - If a target language needs variants where the source is a simple string
   (or vice versa), you may change the shape — declare any selector you
   introduce in `declarations`.
-- Match the source's tone and formality. For UI strings, prefer the
-  conventional terms of the platform/language over literal translations, and
-  keep them roughly as short as the source.
+- Settle on a style before translating — tone, formality level (e.g. formal
+  vs. informal address), and key terminology. Ask the user for preferences
+  when unclear, otherwise define one yourself and state it in your summary.
+- For UI strings, prefer the conventional terms of the platform/language
+  over literal translations, and keep them roughly as short as the source.
 - When a source string is ambiguous (e.g. "Open" — verb or adjective?), use
   the message key and sibling keys (`get_messages` with a `prefix`) for
   context. If still ambiguous, make the safest choice and mention it in your
