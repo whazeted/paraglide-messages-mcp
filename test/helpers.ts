@@ -2,24 +2,31 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+export const MESSAGE_FILE_SCHEMA =
+	"https://inlang.com/schema/inlang-message-format";
+
+export interface FixtureProject {
+	rootDir: string;
+	projectPath: string;
+	messagesDir: string;
+	readMessages: (locale: string) => Record<string, unknown>;
+}
+
 /**
- * Creates a realistic Paraglide-style fixture on disk:
+ * Writes a Paraglide-style project to a temp directory:
  *
  *   <tmp>/project.inlang/settings.json
- *   <tmp>/messages/en.json   (fully translated source)
- *   <tmp>/messages/de.json   (partially translated)
- *   <tmp>/messages/fr.json   (empty)
+ *   <tmp>/messages/<locale>.json        (one per locale, $schema added)
  *
  * `modules` is left empty so tests never touch the network — the server's
  * bundled message-format plugin fallback kicks in (the same path an offline
  * user without a plugin cache hits).
  */
-export function createFixtureProject(): {
-	rootDir: string;
-	projectPath: string;
-	messagesDir: string;
-	readMessages: (locale: string) => Record<string, unknown>;
-} {
+export function scaffoldProject(args: {
+	baseLocale: string;
+	locales: string[];
+	messages: Record<string, Record<string, unknown>>;
+}): FixtureProject {
 	const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "paraglide-mcp-test-"));
 	const projectPath = path.join(rootDir, "project.inlang");
 	const messagesDir = path.join(rootDir, "messages");
@@ -31,8 +38,8 @@ export function createFixtureProject(): {
 		JSON.stringify(
 			{
 				$schema: "https://inlang.com/schema/project-settings",
-				baseLocale: "en",
-				locales: ["en", "de", "fr"],
+				baseLocale: args.baseLocale,
+				locales: args.locales,
 				modules: [],
 				"plugin.inlang.messageFormat": {
 					pathPattern: "./messages/{locale}.json",
@@ -43,39 +50,14 @@ export function createFixtureProject(): {
 		)
 	);
 
-	const en = {
-		$schema: "https://inlang.com/schema/inlang-message-format",
-		hello_world: "Hello world!",
-		greeting: "Hello {name}!",
-		checkout_title: "Checkout",
-		checkout_button_pay: "Pay now",
-		checkout_button_cancel: "Cancel",
-		inbox_count: [
-			{
-				declarations: ["input count", "local countPlural = count: plural"],
-				selectors: ["countPlural"],
-				match: {
-					"countPlural=one": "You have {count} message",
-					"countPlural=other": "You have {count} messages",
-				},
-			},
-		],
-	};
-
-	const de = {
-		$schema: "https://inlang.com/schema/inlang-message-format",
-		hello_world: "Hallo Welt!",
-		greeting: "Hallo {name}!",
-	};
-
-	const fr = {
-		$schema: "https://inlang.com/schema/inlang-message-format",
-	};
-
-	for (const [locale, content] of Object.entries({ en, de, fr })) {
+	for (const locale of args.locales) {
 		fs.writeFileSync(
 			path.join(messagesDir, `${locale}.json`),
-			JSON.stringify(content, null, "\t")
+			JSON.stringify(
+				{ $schema: MESSAGE_FILE_SCHEMA, ...args.messages[locale] },
+				null,
+				"\t"
+			)
 		);
 	}
 
@@ -88,6 +70,41 @@ export function createFixtureProject(): {
 				fs.readFileSync(path.join(messagesDir, `${locale}.json`), "utf8")
 			),
 	};
+}
+
+/**
+ * Small handwritten fixture: en fully translated, de partial, fr empty.
+ * Used by the unit and e2e tests where exact contents matter.
+ */
+export function createFixtureProject(): FixtureProject {
+	return scaffoldProject({
+		baseLocale: "en",
+		locales: ["en", "de", "fr"],
+		messages: {
+			en: {
+				hello_world: "Hello world!",
+				greeting: "Hello {name}!",
+				checkout_title: "Checkout",
+				checkout_button_pay: "Pay now",
+				checkout_button_cancel: "Cancel",
+				inbox_count: [
+					{
+						declarations: ["input count", "local countPlural = count: plural"],
+						selectors: ["countPlural"],
+						match: {
+							"countPlural=one": "You have {count} message",
+							"countPlural=other": "You have {count} messages",
+						},
+					},
+				],
+			},
+			de: {
+				hello_world: "Hallo Welt!",
+				greeting: "Hallo {name}!",
+			},
+			fr: {},
+		},
+	});
 }
 
 export function removeFixture(rootDir: string): void {
