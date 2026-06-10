@@ -66,10 +66,14 @@ function findClosingBrace(value: string, openingIndex: number): number {
 	return -1;
 }
 
-/** All patterns contained in a message value (1 for simple, n for variants). */
+/**
+ * All patterns contained in a message value (1 for simple, n for variants).
+ * Values read from disk may carry multiple array elements (legacy or
+ * hand-written files) — every element's patterns count.
+ */
 export function patternsOf(value: MessageValue): string[] {
 	if (isComplexMessage(value)) {
-		return Object.values(value[0]?.match ?? {});
+		return value.flatMap((spec) => Object.values(spec?.match ?? {}));
 	}
 	return [value];
 }
@@ -86,9 +90,11 @@ export function placeholdersOf(value: MessageValue): string[] {
 		}
 	}
 	if (isComplexMessage(value)) {
-		for (const declaration of value[0]?.declarations ?? []) {
-			if (declaration.startsWith("input ")) {
-				result.add(declaration.slice("input ".length).trim());
+		for (const spec of value) {
+			for (const declaration of spec?.declarations ?? []) {
+				if (declaration.startsWith("input ")) {
+					result.add(declaration.slice("input ".length).trim());
+				}
 			}
 		}
 	}
@@ -121,13 +127,7 @@ export function validateTranslation(
 	const warnings: string[] = [];
 
 	if (!isValidMessageValue(translation)) {
-		return {
-			errors: [
-				"value must be a string or a single-element array of the form " +
-					'[{ "declarations"?: string[], "selectors"?: string[], "match": { "<selector>=<value>": "<pattern>" } }]',
-			],
-			warnings,
-		};
+		return { errors: [messageValueError(translation)], warnings };
 	}
 
 	const sourceVariables = new Set(placeholdersOf(source));
@@ -221,6 +221,29 @@ export function isValidMessageValue(value: unknown): value is MessageValue {
 	return false;
 }
 
+/**
+ * The structural-rejection message for a value that failed
+ * isValidMessageValue. Multi-element variant arrays get a specific
+ * explanation: the file schema allows them, but the message-format plugin
+ * (and thus the Paraglide compiler) only reads the first element, so saving
+ * them would write content the toolchain silently ignores. The fix is to
+ * consolidate, which this message walks the agent through.
+ */
+export function messageValueError(value: unknown): string {
+	if (Array.isArray(value) && value.length > 1) {
+		return (
+			`the variant array has ${value.length} elements, but the toolchain only reads the first — ` +
+			"consolidate all variants into ONE array element by merging every element's " +
+			'"match" entries (and "declarations"/"selectors") into a single ' +
+			'{ "declarations": [...], "selectors": [...], "match": {...} } object'
+		);
+	}
+	return (
+		"value must be a string or a single-element array of the form " +
+		'[{ "declarations"?: string[], "selectors"?: string[], "match": { "<selector>=<value>": "<pattern>" } }]'
+	);
+}
+
 function declarationName(declaration: string): string | undefined {
 	if (declaration.startsWith("input ")) {
 		return declaration.slice("input ".length).trim();
@@ -238,8 +261,7 @@ function declarationName(declaration: string): string | undefined {
 export function isEmptyValue(value: MessageValue | undefined): boolean {
 	if (value === undefined) return true;
 	if (typeof value === "string") return value.trim().length === 0;
-	const match = value[0]?.match ?? {};
-	const patterns = Object.values(match);
+	const patterns = patternsOf(value);
 	return (
 		patterns.length === 0 || patterns.every((p) => p.trim().length === 0)
 	);

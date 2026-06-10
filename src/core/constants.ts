@@ -22,5 +22,9 @@ export const MAX_KEYS_LIMIT = 500;
 export const DEFAULT_MESSAGES_LIMIT = 50;
 export const MAX_MESSAGES_LIMIT = 200;
 
+/** Default/max number of results per search_messages call. */
+export const DEFAULT_SEARCH_LIMIT = 20;
+export const MAX_SEARCH_LIMIT = 100;
+
 /** Max suggestions returned for prompt/resource argument completion. */
 export const COMPLETION_LIMIT = 50;

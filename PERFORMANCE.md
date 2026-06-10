@@ -98,7 +98,7 @@ would do: `plugin.inlang.messageFormat` settings with a single string
 `pathPattern`, and no other import/export plugin module configured. Projects
 with a `pathPattern` array (multi-file namespaces) or other plugins
 (i18next, etc.) transparently fall back to the SDK path, which is unchanged.
-Setting the `PARAGLIDE_MCP_NO_FAST_PATH` environment variable forces the SDK
+Setting the `PARAGLIDE_MCP_FORCE_SDK` environment variable forces the SDK
 path as an escape hatch. An equivalence test
 ([test/direct.test.ts](test/direct.test.ts)) verifies both paths produce
 identical results, and the server remains fully stateless — every call still

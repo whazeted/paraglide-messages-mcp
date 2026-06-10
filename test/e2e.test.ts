@@ -53,14 +53,19 @@ async function callTool<T>(name: string, args: Record<string, unknown>): Promise
 }
 
 describe("paraglide-mcp end to end", () => {
-	it("exposes the five tools", async () => {
+	it("exposes the ten tools", async () => {
 		const { tools } = await client.listTools();
 		expect(tools.map((t) => t.name).sort()).toEqual([
+			"add_locale",
+			"delete_messages",
 			"get_messages",
 			"get_translation_batch",
 			"list_message_keys",
 			"project_info",
+			"remove_locale",
+			"rename_message",
 			"save_translations",
+			"search_messages",
 		]);
 		for (const tool of tools) {
 			expect(tool.outputSchema, `${tool.name} outputSchema`).toBeDefined();
@@ -291,5 +296,111 @@ describe("paraglide-mcp end to end", () => {
 			argument: { name: "prefix", value: "checkout_" },
 		});
 		expect(prefixes.completion.values).toContain("checkout_title");
+	});
+
+	// the mutation tests run last so the fixture state the tests above rely on
+	// (key set, missing counts) is not disturbed
+
+	it("renames a message across locales and writes to disk", async () => {
+		const result = await callTool<{
+			key: string;
+			newKey: string;
+			updatedLocales: string[];
+		}>("rename_message", { key: "checkout_title", newKey: "checkout_heading" });
+		expect(result.updatedLocales).toContain("en");
+		expect(result.updatedLocales).toContain("de");
+
+		const enFile = fixture.readMessages("en") as Record<string, unknown>;
+		expect(enFile.checkout_title).toBeUndefined();
+		expect(enFile.checkout_heading).toBe("Checkout");
+		const deFile = fixture.readMessages("de") as Record<string, unknown>;
+		expect(deFile.checkout_heading).toBe("DE:Checkout");
+	});
+
+	it("rejects a rename onto an existing key as a tool error", async () => {
+		const result = await client.callTool({
+			name: "rename_message",
+			arguments: { key: "greeting", newKey: "hello_world" },
+		});
+		expect(result.isError).toBe(true);
+	});
+
+	it("deletes messages from all locale files on disk", async () => {
+		const result = await callTool<{
+			deleted: number;
+			failed: number;
+			results: Array<{ key: string; status: string; error?: string }>;
+		}>("delete_messages", {
+			keys: ["checkout_button_cancel", "nope_does_not_exist"],
+		});
+		expect(result.deleted).toBe(1);
+		expect(result.failed).toBe(1);
+		expect(
+			result.results.find((r) => r.key === "nope_does_not_exist")?.error
+		).toContain("unknown message key");
+
+		for (const locale of ["en", "de"]) {
+			const file = fixture.readMessages(locale) as Record<string, unknown>;
+			expect(file.checkout_button_cancel).toBeUndefined();
+		}
+
+		const info = await callTool<{ totalKeys: number }>("project_info", {});
+		expect(info.totalKeys).toBe(5);
+	});
+
+	it("saves a source-diverging translation with skipValidation", async () => {
+		// the same value was rejected without the flag in the validation test above
+		const result = await callTool<{ saved: number; failed: number }>(
+			"save_translations",
+			{
+				targetLocale: "fr",
+				translations: [{ key: "greeting", value: "Bonjour {nom} !" }],
+				skipValidation: true,
+			}
+		);
+		expect(result.saved).toBe(1);
+		expect(result.failed).toBe(0);
+		expect(
+			(fixture.readMessages("fr") as Record<string, unknown>).greeting
+		).toBe("Bonjour {nom} !");
+	});
+
+	it("adds a locale, translates into it, and removes it again", async () => {
+		const added = await callTool<{
+			locale: string;
+			locales: string[];
+			messageFileCreated: boolean;
+		}>("add_locale", { locale: "es" });
+		expect(added.locales).toEqual(["en", "de", "fr", "es"]);
+		expect(added.messageFileCreated).toBe(true);
+
+		const save = await callTool<{ saved: number }>("save_translations", {
+			targetLocale: "es",
+			translations: [{ key: "greeting", value: "¡Hola {name}!" }],
+		});
+		expect(save.saved).toBe(1);
+		expect(
+			(fixture.readMessages("es") as Record<string, unknown>).greeting
+		).toBe("¡Hola {name}!");
+
+		const removed = await callTool<{
+			locales: string[];
+			discardedTranslations: number;
+			messageFileDeleted: boolean;
+		}>("remove_locale", { locale: "es" });
+		expect(removed.locales).toEqual(["en", "de", "fr"]);
+		expect(removed.discardedTranslations).toBe(1);
+		expect(removed.messageFileDeleted).toBe(true);
+
+		const info = await callTool<{ locales: string[] }>("project_info", {});
+		expect(info.locales).toEqual(["en", "de", "fr"]);
+	});
+
+	it("refuses to remove the base locale as a tool error", async () => {
+		const result = await client.callTool({
+			name: "remove_locale",
+			arguments: { locale: "en" },
+		});
+		expect(result.isError).toBe(true);
 	});
 });

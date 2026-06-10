@@ -1,6 +1,7 @@
 import { flatten, unflatten } from "flat";
 import type { InlangProject } from "@inlang/sdk";
 import {
+	mutateDirectLocale,
 	readDirectSnapshot,
 	resolveDirectProject,
 	writeDirectLocale,
@@ -28,6 +29,19 @@ export interface UpdatePlan<T> {
 }
 
 /**
+ * What a key mutation decides to persist, plus the value to return to the
+ * caller. Unlike UpdatePlan this spans all locales and can remove keys —
+ * needed by delete/rename, which plain value merging cannot express.
+ */
+export interface KeyMutationPlan<T> {
+	/** keys to remove from every locale (may be empty) */
+	deletions: string[];
+	/** per-locale `key -> value` entries to write (may be empty) */
+	additions: Record<string, LocaleMessages>;
+	result: T;
+}
+
+/**
  * How the project is read and written. Both implementations are stateless —
  * every call reads fresh from disk, so external edits (compiler, editor,
  * git) are always picked up.
@@ -43,6 +57,14 @@ export interface ProjectStorage {
 	update<T>(
 		targetLocale: string,
 		plan: (context: ProjectSnapshot) => UpdatePlan<T>
+	): Promise<T>;
+	/**
+	 * Reads the snapshot, lets `plan` decide which keys to remove and which
+	 * per-locale values to write, persists both, and returns the plan's result.
+	 * Used by delete/rename, which touch all locales and remove keys.
+	 */
+	mutateKeys<T>(
+		plan: (context: ProjectSnapshot) => KeyMutationPlan<T>
 	): Promise<T>;
 }
 
@@ -67,6 +89,18 @@ export function createStorage(projectPath: string): ProjectStorage {
 				const { values, result } = plan(await read());
 				if (Object.keys(values).length > 0) {
 					writeDirectLocale(direct, targetLocale, values);
+				}
+				return result;
+			},
+			async mutateKeys(plan) {
+				const { deletions, additions, result } = plan(await read());
+				for (const locale of direct.locales) {
+					mutateDirectLocale(
+						direct,
+						locale,
+						additions[locale] ?? {},
+						deletions
+					);
 				}
 				return result;
 			},
@@ -95,6 +129,34 @@ export function createStorage(projectPath: string): ProjectStorage {
 							},
 						],
 					});
+					await saveProject(project, projectPath);
+				}
+				return result;
+			});
+		},
+		async mutateKeys(plan) {
+			return await withProject(projectPath, async (project) => {
+				const context = await read(project);
+				const { deletions, additions, result } = plan(context);
+				const files = Object.entries(additions)
+					.filter(([, values]) => Object.keys(values).length > 0)
+					.map(([locale, values]) => ({
+						locale,
+						content: new TextEncoder().encode(
+							JSON.stringify(unflatten(values))
+						),
+					}));
+				if (files.length > 0) {
+					await project.importFiles({ pluginKey: context.pluginKey, files });
+				}
+				if (deletions.length > 0) {
+					// bundle ids are the message keys; messages/variants cascade
+					await project.db
+						.deleteFrom("bundle")
+						.where("id", "in", deletions)
+						.execute();
+				}
+				if (files.length > 0 || deletions.length > 0) {
 					await saveProject(project, projectPath);
 				}
 				return result;

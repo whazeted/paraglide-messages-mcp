@@ -6,6 +6,7 @@ import {
 	MAX_KEYS_LIMIT,
 	MAX_MESSAGES_LIMIT,
 	MAX_SAVE_BATCH,
+	MAX_SEARCH_LIMIT,
 } from "../core/constants.js";
 import type { TranslationService } from "../core/service.js";
 import type { TranslationInput } from "../core/types.js";
@@ -16,9 +17,12 @@ const variantSchema = z.object({
 	match: z.record(z.string(), z.string()),
 });
 
+// .min(1) instead of .length(1): a multi-element array passes the transport
+// schema so the service can reject it per-item with an actionable
+// consolidation hint (see messageValueError) instead of an opaque zod error.
 const messageValueSchema = z.union([
 	z.string(),
-	z.array(variantSchema).length(1),
+	z.array(variantSchema).min(1),
 ]);
 
 // Output values come from message files on disk, which may contain
@@ -145,6 +149,54 @@ export function registerTools(
 	);
 
 	server.registerTool(
+		"search_messages",
+		{
+			title: "Search messages",
+			description:
+				"Find messages by text content or key substring (case-insensitive). Use this when " +
+				"you know the UI text but not the key — e.g. searching 'Add to cart' returns the " +
+				"message key plus the locale(s) and value(s) where the text appears. Searches all " +
+				"locales by default.",
+			inputSchema: {
+				query: z
+					.string()
+					.min(1)
+					.describe("text to search for in message values and keys"),
+				locales: z
+					.array(z.string())
+					.optional()
+					.describe(
+						"restrict the content search to these locales (default: all project locales)"
+					),
+				limit: z.number().int().min(1).max(MAX_SEARCH_LIMIT).optional(),
+			},
+			outputSchema: {
+				results: z.array(
+					z.object({
+						key: z.string(),
+						keyMatched: z
+							.boolean()
+							.describe("true when the key itself contains the query"),
+						matches: z
+							.array(
+								z.object({
+									locale: z.string(),
+									value: messageValueOutputSchema,
+								})
+							)
+							.describe("locales whose message text contains the query"),
+					})
+				),
+				total: z.number().int().describe("total matching keys before `limit`"),
+				truncated: z
+					.boolean()
+					.describe("true when more keys matched than `limit` allowed"),
+			},
+		},
+		async (args) => jsonResult(await service.searchMessages(args))
+	);
+
+	server.registerTool(
 		"get_translation_batch",
 		{
 			title: "Get translation batch",
@@ -233,6 +285,14 @@ export function registerTools(
 					.describe(
 						"allow creating keys that don't exist yet (default false; protects against typos)"
 					),
+				skipValidation: z
+					.boolean()
+					.optional()
+					.describe(
+						"skip placeholder/markup/variant validation against the source (default false). " +
+							"Use only when a translation deliberately diverges, e.g. it doesn't need a " +
+							"source placeholder. Structural and key checks still apply."
+					),
 			},
 			outputSchema: {
 				results: z.array(
@@ -258,8 +318,120 @@ export function registerTools(
 					// zod validates the single-element variant array shape at runtime
 					translations: args.translations as TranslationInput[],
 					allowNewKeys: args.allowNewKeys,
+					skipValidation: args.skipValidation,
 				})
 			)
+	);
+
+	server.registerTool(
+		"delete_messages",
+		{
+			title: "Delete messages",
+			description:
+				"Delete messages by key from every locale's message file. Unknown keys are " +
+				"rejected individually while the rest are still deleted. Deletion is permanent — " +
+				"verify keys with list_message_keys/get_messages first.",
+			inputSchema: {
+				keys: z
+					.array(z.string())
+					.min(1)
+					.max(MAX_SAVE_BATCH)
+					.describe(
+						`message keys to delete from all locales (max ${MAX_SAVE_BATCH} per call)`
+					),
+			},
+			outputSchema: {
+				results: z.array(
+					z.object({
+						key: z.string(),
+						status: z.enum(["deleted", "error"]),
+						error: z.string().optional(),
+					})
+				),
+				deleted: z.number().int(),
+				failed: z.number().int(),
+			},
+		},
+		async (args) => jsonResult(await service.deleteMessages(args))
+	);
+
+	server.registerTool(
+		"rename_message",
+		{
+			title: "Rename message",
+			description:
+				"Rename a message key across every locale, keeping all translated values. " +
+				"Fails without changing anything when the old key doesn't exist or the new " +
+				"key is already taken. Remember to update code references to the old key.",
+			inputSchema: {
+				key: z.string().describe("current message key"),
+				newKey: z.string().describe("new message key (must not exist yet)"),
+			},
+			outputSchema: {
+				key: z.string(),
+				newKey: z.string(),
+				updatedLocales: z
+					.array(z.string())
+					.describe("locales that had a value under the old key"),
+			},
+		},
+		async (args) => jsonResult(await service.renameMessage(args))
+	);
+
+	server.registerTool(
+		"add_locale",
+		{
+			title: "Add locale",
+			description:
+				"Add a locale to the project settings so it can be translated into. For " +
+				"message-format projects an empty message file is also created. The locale " +
+				"tag is stored as-is (no format validation) — follow the convention the " +
+				"project already uses (see project_info).",
+			inputSchema: {
+				locale: z
+					.string()
+					.describe(
+						"locale tag to add, in the project's existing convention (e.g. 'es' or 'pt-BR')"
+					),
+			},
+			outputSchema: {
+				locale: z.string(),
+				locales: z
+					.array(z.string())
+					.describe("the project's locales after the change"),
+				messageFileCreated: z
+					.boolean()
+					.describe("true when an empty message file was seeded"),
+			},
+		},
+		async (args) => jsonResult(await service.addLocale(args))
+	);
+
+	server.registerTool(
+		"remove_locale",
+		{
+			title: "Remove locale",
+			description:
+				"Remove a locale from the project settings and delete its message file. " +
+				"Permanently discards every translation in that locale — check `translated` " +
+				"in project_info first and confirm with the user. The base locale cannot " +
+				"be removed.",
+			inputSchema: {
+				locale: z.string().describe("locale tag to remove"),
+			},
+			outputSchema: {
+				locale: z.string(),
+				locales: z
+					.array(z.string())
+					.describe("the project's locales after the change"),
+				discardedTranslations: z
+					.number()
+					.int()
+					.describe("non-empty translations that existed in the locale"),
+				messageFileDeleted: z.boolean(),
+			},
+		},
+		async (args) => jsonResult(await service.removeLocale(args))
 	);
 }
 

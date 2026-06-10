@@ -38,6 +38,11 @@ External edits (your editor, the Paraglide compiler, git) are always picked
 up. If the configured plugin can't be fetched (offline, no cache), a bundled
 copy of the message-format plugin is used as a fallback.
 
+Works with the standard Paraglide JS setup out of the box, and with i18next,
+next-intl, and ICU MessageFormat projects through their inlang plugins — see
+[COMPATIBILITY.md](COMPATIBILITY.md) for the full support matrix (and why
+PO/XLIFF are not supported).
+
 ## Tools
 
 | Tool | Purpose |
@@ -45,8 +50,13 @@ copy of the message-format plugin is used as a fallback.
 | `project_info` | Locales, base locale, and per-locale translated/missing counts. |
 | `list_message_keys` | Keys only (cheap), filterable by key prefix (`startsWith`) and per-locale status (`missing` / `translated`), with cursor pagination. |
 | `get_messages` | Full message content by exact keys or prefix, optionally restricted to specific locales. |
+| `search_messages` | Find messages by text content or key substring (case-insensitive) — for when you know the UI text ("Add to cart") but not the key. |
 | `get_translation_batch` | The next *N* untranslated messages for a target locale (default 5, max 25), with source text, required placeholders, and a `remaining` counter. |
 | `save_translations` | Validate and persist translations for one locale (max 25 per call). Per-item results; valid items are saved even when others fail. |
+| `delete_messages` | Delete messages by key from every locale (max 25 per call). Unknown keys are rejected individually while the rest are still deleted. |
+| `rename_message` | Rename a message key across every locale, keeping all translated values. Fails without changes when the old key is missing or the new key is taken. |
+| `add_locale` | Add a locale to the project settings (and seed an empty message file for message-format projects). Locale tags are stored as-is — no format opinion. |
+| `remove_locale` | Remove a locale from the settings and delete its message file. Reports how many translations were discarded; the base locale can't be removed. |
 
 ## Prompts
 
@@ -123,6 +133,13 @@ Translations may change shape when the target language requires it (e.g. a
 string becomes a plural variant set for Czech) as long as introduced
 selectors are declared.
 
+Variant arrays with more than one element (found in some legacy or
+hand-written files) are read in full — placeholders from every element count
+— but can't be saved back as-is, because the message-format plugin and the
+Paraglide compiler silently ignore everything after the first element. The
+save error explains the fix: consolidate all variants into one element's
+`match`.
+
 ### Validation
 
 `save_translations` rejects, per item:
@@ -137,6 +154,11 @@ selectors are declared.
 Dropped source placeholders produce warnings, not errors, since languages
 legitimately drop variables in some variants.
 
+The source-comparison checks can be bypassed per call with
+`skipValidation: true` — for translations that deliberately diverge from the
+source, e.g. when the target doesn't need a placeholder. Structural validation
+and the unknown-key guard still apply.
+
 ## Agent skill
 
 `skill/paraglide-translation/` contains an installable skill that teaches an
@@ -144,12 +166,6 @@ agent the batch workflow, plural-rule handling, and error recovery. It uses
 the open [Agent Skills](https://agentskills.io) format, so it works with any
 agent that supports `SKILL.md` (Claude Code, Codex, Cursor, Copilot, Gemini
 CLI, ...).
-
-`SKILL.md` is generated — edit
-[src/skill/SKILL.template.md](src/skill/SKILL.template.md) instead and run
-`pnpm build`. Batch-size guidance is interpolated from
-[src/core/limits.ts](src/core/limits.ts), and a test fails when the committed
-file is out of date.
 
 **Claude Code** — install the plugin, which bundles both the MCP server and
 the skill (no `.mcp.json` needed):
@@ -219,4 +235,5 @@ git push --follow-tags
 ## Requirements
 
 - Node.js >= 20
-- An inlang project (Paraglide JS default setup works out of the box)
+- An inlang project (Paraglide JS default setup works out of the box) — see
+  [COMPATIBILITY.md](COMPATIBILITY.md) for supported formats and plugins

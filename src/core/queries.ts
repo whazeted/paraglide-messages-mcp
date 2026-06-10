@@ -1,11 +1,13 @@
-import { isEmptyValue, placeholdersOf } from "./format.js";
+import { isEmptyValue, patternsOf, placeholdersOf } from "./format.js";
 import {
 	DEFAULT_BATCH_SIZE,
 	DEFAULT_KEYS_LIMIT,
 	DEFAULT_MESSAGES_LIMIT,
+	DEFAULT_SEARCH_LIMIT,
 	MAX_BATCH_SIZE,
 	MAX_KEYS_LIMIT,
 	MAX_MESSAGES_LIMIT,
+	MAX_SEARCH_LIMIT,
 } from "./constants.js";
 import { collectKeys, type ProjectSnapshot } from "./storage.js";
 import type { MessageValue, ProjectInfo, TranslationItem } from "./types.js";
@@ -212,6 +214,69 @@ export function nextTranslationBatch(
 		items,
 		remaining: pending.length,
 		done: pending.length === 0,
+	};
+}
+
+export function searchMessages(
+	context: ProjectSnapshot,
+	args: {
+		query: string;
+		locales?: string[];
+		limit?: number;
+	}
+): {
+	results: Array<{
+		key: string;
+		keyMatched: boolean;
+		matches: Array<{ locale: string; value: MessageValue }>;
+	}>;
+	total: number;
+	truncated: boolean;
+} {
+	const { locales: projectLocales, snapshot } = context;
+
+	const query = args.query.trim().toLowerCase();
+	if (query.length === 0) {
+		throw new Error("query must not be empty");
+	}
+
+	const locales = args.locales ?? projectLocales;
+	for (const locale of locales) {
+		if (!projectLocales.includes(locale)) {
+			throw unknownLocaleError(locale, projectLocales);
+		}
+	}
+
+	const results: Array<{
+		key: string;
+		keyMatched: boolean;
+		matches: Array<{ locale: string; value: MessageValue }>;
+	}> = [];
+
+	for (const key of [...collectKeys(snapshot)].sort()) {
+		const keyMatched = key.toLowerCase().includes(query);
+		const matches: Array<{ locale: string; value: MessageValue }> = [];
+		for (const locale of locales) {
+			const value = snapshot[locale]?.[key];
+			if (value === undefined) continue;
+			const textMatched = patternsOf(value).some((pattern) =>
+				pattern.toLowerCase().includes(query)
+			);
+			if (textMatched) {
+				matches.push({ locale, value });
+			}
+		}
+		if (keyMatched || matches.length > 0) {
+			results.push({ key, keyMatched, matches });
+		}
+	}
+
+	const total = results.length;
+	const limit = clamp(args.limit ?? DEFAULT_SEARCH_LIMIT, 1, MAX_SEARCH_LIMIT);
+	return {
+		results: results.slice(0, limit),
+		total,
+		truncated: total > limit,
 	};
 }
 

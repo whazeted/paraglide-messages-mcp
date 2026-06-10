@@ -34,7 +34,7 @@ function patchSettings(
 }
 
 afterEach(() => {
-	delete process.env.PARAGLIDE_MCP_NO_FAST_PATH;
+	delete process.env.PARAGLIDE_MCP_FORCE_SDK;
 	while (fixtures.length > 0) {
 		removeFixture(fixtures.pop()!.rootDir);
 	}
@@ -80,9 +80,9 @@ describe("resolveDirectProject", () => {
 		expect(resolveDirectProject(f.projectPath)).not.toBeNull();
 	});
 
-	it("returns null when PARAGLIDE_MCP_NO_FAST_PATH is set", () => {
+	it("returns null when PARAGLIDE_MCP_FORCE_SDK is set", () => {
 		const f = fixture();
-		process.env.PARAGLIDE_MCP_NO_FAST_PATH = "1";
+		process.env.PARAGLIDE_MCP_FORCE_SDK = "1";
 		expect(resolveDirectProject(f.projectPath)).toBeNull();
 	});
 });
@@ -118,6 +118,25 @@ describe("direct writes", () => {
 		expect(f.readMessages("fr").greeting).toBe("Bonjour {name}!");
 	});
 
+	it("rewrites only the locale files a key mutation touches", async () => {
+		const f = fixture();
+		// fr is empty, so deleting/renaming en+de keys must not rewrite it
+		const frBefore = fs.readFileSync(
+			path.join(f.messagesDir, "fr.json"),
+			"utf8"
+		);
+
+		const service = new TranslationService(f.projectPath);
+		await service.deleteMessages({ keys: ["hello_world"] });
+		await service.renameMessage({ key: "greeting", newKey: "welcome" });
+
+		expect(
+			fs.readFileSync(path.join(f.messagesDir, "fr.json"), "utf8")
+		).toBe(frBefore);
+		expect(f.readMessages("en").hello_world).toBeUndefined();
+		expect(f.readMessages("de").welcome).toBe("Hallo {name}!");
+	});
+
 	it("respects the plugin's sort setting", async () => {
 		const f = fixture();
 		patchSettings(f, (s) => {
@@ -141,7 +160,7 @@ describe("direct writes", () => {
 	});
 });
 
-describe("SDK fallback (PARAGLIDE_MCP_NO_FAST_PATH)", () => {
+describe("SDK fallback (PARAGLIDE_MCP_FORCE_SDK)", () => {
 	it("produces the same results as the fast path", async () => {
 		const run = async () => {
 			const f = fixture();
@@ -162,9 +181,75 @@ describe("SDK fallback (PARAGLIDE_MCP_NO_FAST_PATH)", () => {
 		};
 
 		const fast = await run();
-		process.env.PARAGLIDE_MCP_NO_FAST_PATH = "1";
+		process.env.PARAGLIDE_MCP_FORCE_SDK = "1";
 		const sdk = await run();
 
 		expect(fast).toEqual(sdk);
+	});
+
+	it("deletes and renames identically to the fast path", async () => {
+		const run = async () => {
+			const f = fixture();
+			const service = new TranslationService(f.projectPath);
+			const deletion = await service.deleteMessages({
+				keys: ["hello_world", "does_not_exist"],
+			});
+			const rename = await service.renameMessage({
+				key: "greeting",
+				newKey: "welcome",
+			});
+			return {
+				deletion,
+				rename,
+				enFile: f.readMessages("en"),
+				deFile: f.readMessages("de"),
+			};
+		};
+
+		const fast = await run();
+		process.env.PARAGLIDE_MCP_FORCE_SDK = "1";
+		const sdk = await run();
+
+		expect(fast.deletion).toEqual(sdk.deletion);
+		expect(fast.rename).toEqual(sdk.rename);
+		for (const locale of ["enFile", "deFile"] as const) {
+			expect(fast[locale].hello_world).toBeUndefined();
+			expect(sdk[locale].hello_world).toBeUndefined();
+			expect(fast[locale].greeting).toBeUndefined();
+			expect(sdk[locale].greeting).toBeUndefined();
+			expect(sdk[locale].welcome).toEqual(fast[locale].welcome);
+		}
+		expect(fast.enFile.welcome).toBe("Hello {name}!");
+	});
+});
+
+describe("locale management file handling", () => {
+	it("seeds and deletes message files even when the fast path is disabled", async () => {
+		const f = fixture();
+		process.env.PARAGLIDE_MCP_FORCE_SDK = "1";
+		const service = new TranslationService(f.projectPath);
+
+		const added = await service.addLocale({ locale: "es" });
+		expect(added.messageFileCreated).toBe(true);
+		expect(fs.existsSync(path.join(f.messagesDir, "es.json"))).toBe(true);
+
+		const removed = await service.removeLocale({ locale: "es" });
+		expect(removed.messageFileDeleted).toBe(true);
+		expect(fs.existsSync(path.join(f.messagesDir, "es.json"))).toBe(false);
+	});
+
+	it("skips file handling when the message file location is not resolvable", async () => {
+		const f = fixture();
+		// array pathPattern: multiple files per locale — location not resolvable
+		patchSettings(f, (s) => {
+			(s["plugin.inlang.messageFormat"] as Record<string, unknown>).pathPattern =
+				["./messages/{locale}.json"];
+		});
+		const service = new TranslationService(f.projectPath);
+
+		const added = await service.addLocale({ locale: "es" });
+		expect(added.messageFileCreated).toBe(false);
+		expect(added.locales).toContain("es");
+		expect(fs.existsSync(path.join(f.messagesDir, "es.json"))).toBe(false);
 	});
 });

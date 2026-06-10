@@ -1,6 +1,7 @@
 import {
 	isEmptyValue,
 	isValidMessageValue,
+	messageValueError,
 	validateTranslation,
 } from "./format.js";
 import { unknownLocaleError } from "./queries.js";
@@ -33,6 +34,7 @@ export function validateBatch(
 		targetLocale: string;
 		translations: TranslationInput[];
 		allowNewKeys?: boolean;
+		skipValidation?: boolean;
 	}
 ): { results: SaveResultItem[]; accepted: Record<string, MessageValue> } {
 	const { baseLocale, locales, snapshot } = context;
@@ -70,7 +72,11 @@ export function validateBatch(
 		}
 
 		const source = snapshot[baseLocale]?.[item.key];
-		if (source !== undefined && targetLocale !== baseLocale) {
+		if (
+			source !== undefined &&
+			targetLocale !== baseLocale &&
+			!args.skipValidation
+		) {
 			const validation = validateTranslation(source, item.value);
 			if (validation.errors.length > 0) {
 				results.push({
@@ -89,12 +95,13 @@ export function validateBatch(
 				}),
 			});
 		} else {
-			// new key or base-locale edit: only structural validation applies
+			// new key, base-locale edit, or skipValidation: only structural
+			// validation applies
 			if (!isValidMessageValue(item.value)) {
 				results.push({
 					key: item.key,
 					status: "error",
-					error: "value must be a string or a single-element variant array",
+					error: messageValueError(item.value),
 				});
 				continue;
 			}

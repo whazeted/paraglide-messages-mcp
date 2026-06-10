@@ -14,16 +14,23 @@
  *       "countPlural=other": "{count} messages"
  *     }
  *   }]
+ *
+ * The file schema permits more than one array element, and hand-written or
+ * legacy files may contain them — but the message-format plugin (and thus the
+ * Paraglide compiler) only honors the first element. The server therefore
+ * reads all elements (so such messages are fully understood) but only accepts
+ * the single-element form on save; fixing a multi-element message means
+ * consolidating its variants into one element's `match`.
  */
 export type SimpleMessage = string;
 
-export type ComplexMessage = [
-	{
-		declarations?: string[];
-		selectors?: string[];
-		match: Record<string, string>;
-	},
-];
+export interface VariantSpec {
+	declarations?: string[];
+	selectors?: string[];
+	match: Record<string, string>;
+}
+
+export type ComplexMessage = VariantSpec[];
 
 export type MessageValue = SimpleMessage | ComplexMessage;
 
@@ -68,4 +75,10 @@ export interface SaveResultItem {
 	status: "saved" | "error";
 	error?: string;
 	warnings?: string[];
+}
+
+export interface DeleteResultItem {
+	key: string;
+	status: "deleted" | "error";
+	error?: string;
 }

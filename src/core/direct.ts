@@ -20,7 +20,8 @@ import type {
  * a multi-file `pathPattern`) keep going through the SDK.
  */
 
-const MESSAGE_FILE_SCHEMA = "https://inlang.com/schema/inlang-message-format";
+export const MESSAGE_FILE_SCHEMA =
+	"https://inlang.com/schema/inlang-message-format";
 
 export interface DirectProject {
 	baseLocale: string;
@@ -38,15 +39,26 @@ export interface DirectProject {
  *   (a `pathPattern` array means multiple files per locale — SDK territory)
  * - no other import/export plugin module configured that could take
  *   precedence (lint-rule modules are fine)
- * - the `PARAGLIDE_MCP_NO_FAST_PATH` escape hatch not being set
+ * - the `PARAGLIDE_MCP_FORCE_SDK` escape hatch not being set
  */
 export function resolveDirectProject(
 	projectPath: string
 ): DirectProject | null {
-	if (process.env.PARAGLIDE_MCP_NO_FAST_PATH) {
+	if (process.env.PARAGLIDE_MCP_FORCE_SDK) {
 		return null;
 	}
+	return parseDirectProject(projectPath);
+}
 
+/**
+ * Same as resolveDirectProject but without the escape-hatch check — for
+ * callers that need the message file *location* regardless of whether
+ * message reads/writes go through the SDK (e.g. locale management seeding
+ * or deleting a locale file).
+ */
+export function parseDirectProject(
+	projectPath: string
+): DirectProject | null {
 	let settings: Record<string, unknown>;
 	try {
 		settings = JSON.parse(
@@ -143,12 +155,43 @@ export function writeDirectLocale(
 	accepted: Record<string, MessageValue>
 ): void {
 	const filePath = project.fileFor(locale);
-	const merged: LocaleMessages = {
+	writeLocaleFile(project, filePath, {
 		...readLocaleFile(filePath),
 		...accepted,
-	};
+	});
+}
 
-	let content = unflatten(merged) as Record<string, unknown>;
+/**
+ * Removes `deletions` from and merges `additions` into one locale's message
+ * file. Locale files that the mutation does not touch keep their exact byte
+ * content (no rewrite).
+ */
+export function mutateDirectLocale(
+	project: DirectProject,
+	locale: string,
+	additions: LocaleMessages,
+	deletions: string[]
+): void {
+	const filePath = project.fileFor(locale);
+	const messages = readLocaleFile(filePath);
+
+	const affectedDeletions = deletions.filter((key) => key in messages);
+	if (affectedDeletions.length === 0 && Object.keys(additions).length === 0) {
+		return;
+	}
+
+	for (const key of affectedDeletions) {
+		delete messages[key];
+	}
+	writeLocaleFile(project, filePath, { ...messages, ...additions });
+}
+
+function writeLocaleFile(
+	project: DirectProject,
+	filePath: string,
+	messages: LocaleMessages
+): void {
+	let content = unflatten(messages) as Record<string, unknown>;
 	if (project.sort) {
 		content = sortKeysDeep(content, project.sort) as Record<string, unknown>;
 	}

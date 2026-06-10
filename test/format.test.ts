@@ -197,3 +197,61 @@ describe("isEmptyValue", () => {
 		expect(isEmptyValue([{ match: { "x=*": "" } }])).toBe(true);
 	});
 });
+
+describe("multi-element variant arrays (legacy/hand-written files)", () => {
+	// the file schema allows multiple array elements but the toolchain only
+	// reads the first — the server must still *understand* all of them so a
+	// consolidated fix validates against everything the source contains
+	const multi: ComplexMessage = [
+		{
+			declarations: ["input count"],
+			selectors: ["count"],
+			match: { "count=one": "{count} item" },
+		},
+		{
+			declarations: ["input name"],
+			match: { "count=other": "{count} items for {name}" },
+		},
+	];
+
+	it("placeholdersOf collects from every element", () => {
+		expect(placeholdersOf(multi)).toEqual(["count", "name"]);
+	});
+
+	it("isEmptyValue considers every element's patterns", () => {
+		expect(isEmptyValue(multi)).toBe(false);
+		expect(
+			isEmptyValue([{ match: { "x=*": "" } }, { match: { "y=*": "  " } }])
+		).toBe(true);
+		expect(
+			isEmptyValue([{ match: { "x=*": "" } }, { match: { "y=*": "hi" } }])
+		).toBe(false);
+	});
+
+	it("accepts a consolidated translation using placeholders from any element", () => {
+		const consolidated = [
+			{
+				declarations: ["input count", "input name"],
+				selectors: ["count"],
+				match: {
+					"count=one": "{count} Artikel",
+					"count=other": "{count} Artikel für {name}",
+				},
+			},
+		];
+		const result = validateTranslation(multi, consolidated);
+		expect(result.errors).toEqual([]);
+	});
+
+	it("rejects a multi-element translation with a consolidation hint", () => {
+		const result = validateTranslation(multi, multi);
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0]).toMatch(/2 elements/);
+		expect(result.errors[0]).toMatch(/consolidate/i);
+	});
+
+	it("isValidMessageValue still requires exactly one element", () => {
+		expect(isValidMessageValue(multi)).toBe(false);
+		expect(isValidMessageValue([multi[0]])).toBe(true);
+	});
+});

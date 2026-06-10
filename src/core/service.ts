@@ -1,10 +1,24 @@
 import { MAX_SAVE_BATCH } from "./constants.js";
+import { isEmptyValue } from "./format.js";
+import {
+	addLocale,
+	removeLocale,
+	type AddLocaleResult,
+	type RemoveLocaleResult,
+} from "./locales.js";
 import {
 	computeProjectInfo,
 	nextTranslationBatch,
 	queryKeys,
 	queryMessages,
+	searchMessages,
 } from "./queries.js";
+import {
+	planDeleteMessages,
+	planRenameMessage,
+	type DeleteSummary,
+	type RenameSummary,
+} from "./mutate.js";
 import { validateBatch, summarizeSave, type SaveSummary } from "./save.js";
 import { createStorage } from "./storage.js";
 import type {
@@ -64,6 +78,23 @@ export class TranslationService {
 		return queryMessages(context, args);
 	}
 
+	async searchMessages(args: {
+		query: string;
+		locales?: string[];
+		limit?: number;
+	}): Promise<{
+		results: Array<{
+			key: string;
+			keyMatched: boolean;
+			matches: Array<{ locale: string; value: MessageValue }>;
+		}>;
+		total: number;
+		truncated: boolean;
+	}> {
+		const context = await createStorage(this.projectPath).read();
+		return searchMessages(context, args);
+	}
+
 	async getTranslationBatch(args: {
 		targetLocale: string;
 		sourceLocale?: string;
@@ -84,6 +115,7 @@ export class TranslationService {
 		targetLocale: string;
 		translations: TranslationInput[];
 		allowNewKeys?: boolean;
+		skipValidation?: boolean;
 	}): Promise<SaveSummary> {
 		if (args.translations.length === 0) {
 			throw new Error("translations must not be empty");
@@ -103,5 +135,51 @@ export class TranslationService {
 				};
 			}
 		);
+	}
+
+	async deleteMessages(args: { keys: string[] }): Promise<DeleteSummary> {
+		if (args.keys.length === 0) {
+			throw new Error("keys must not be empty");
+		}
+		if (args.keys.length > MAX_SAVE_BATCH) {
+			throw new Error(
+				`max ${MAX_SAVE_BATCH} keys per call — delete in small batches to keep error rates low`
+			);
+		}
+		return await createStorage(this.projectPath).mutateKeys((context) => {
+			const { results, deletions } = planDeleteMessages(context, args.keys);
+			return {
+				deletions,
+				additions: {},
+				result: {
+					results,
+					deleted: deletions.length,
+					failed: results.length - deletions.length,
+				},
+			};
+		});
+	}
+
+	async renameMessage(args: {
+		key: string;
+		newKey: string;
+	}): Promise<RenameSummary> {
+		return await createStorage(this.projectPath).mutateKeys((context) => {
+			const { additions, summary } = planRenameMessage(context, args);
+			return { deletions: [args.key], additions, result: summary };
+		});
+	}
+
+	async addLocale(args: { locale: string }): Promise<AddLocaleResult> {
+		return addLocale(this.projectPath, args.locale);
+	}
+
+	async removeLocale(args: { locale: string }): Promise<RemoveLocaleResult> {
+		// count what is being discarded while the locale is still readable
+		const context = await createStorage(this.projectPath).read();
+		const discarded = Object.values(
+			context.snapshot[args.locale.trim()] ?? {}
+		).filter((value) => !isEmptyValue(value)).length;
+		return removeLocale(this.projectPath, args.locale, discarded);
 	}
 }

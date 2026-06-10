@@ -59,6 +59,11 @@ context or when you only need to inspect state, not change it.
 - If a target language needs variants where the source is a simple string
   (or vice versa), you may change the shape — declare any selector you
   introduce in `declarations`.
+- Legacy or hand-written files may contain variant arrays with *multiple*
+  elements. The Paraglide toolchain only reads the first element, so when
+  fixing such a message, consolidate it: merge every element's `match`
+  entries (and `declarations`/`selectors`) into one single-element array.
+  The server rejects multi-element saves with a hint saying exactly this.
 - Settle on a style before translating — tone, formality level (e.g. formal
   vs. informal address), and key terminology. Ask the user for preferences
   when unclear, otherwise define one yourself and state it in your summary.
@@ -68,5 +73,19 @@ context or when you only need to inspect state, not change it.
   the message key and sibling keys (`get_messages` with a `prefix`) for
   context. If still ambiguous, make the safest choice and mention it in your
   summary instead of stalling.
+- When the user refers to a message by its UI text rather than its key
+  ("the string that says 'Add to cart'"), find it with `search_messages` —
+  it matches message text and key substrings, case-insensitively.
+- To remove or rename messages, use `delete_messages` / `rename_message` —
+  they update every locale at once. After a rename, remind the user to
+  update code references to the old key.
+- To add or drop a whole locale, use `add_locale` / `remove_locale`. Match
+  the tag convention the project already uses (check `project_info` —
+  e.g. `es` vs `es-ES`). `remove_locale` permanently discards that locale's
+  translations, so confirm with the user first.
+- When a translation must deliberately diverge from the source — e.g. the
+  target language doesn't need a placeholder — pass `skipValidation: true`
+  to `save_translations` for that call. Use it sparingly: it turns off the
+  placeholder/markup/variant checks that normally catch typos.
 - Never edit `messages/*.json` or `project.inlang/` files directly while the
   MCP server is in use — always go through the tools so validation applies.
