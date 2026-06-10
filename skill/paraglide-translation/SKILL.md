@@ -26,6 +26,11 @@ translate everything in one call.
    locales). Suggest the user runs their Paraglide compile step (usually part
    of `dev`/`build`) if they want to see the result in the app.
 
+The server also exposes read-only resources mirroring the read tools —
+`paraglide://project/info`, `paraglide://locales/{locale}/missing`, and
+`paraglide://messages/{locale}/{key}` — handy when the user has pinned one as
+context or when you only need to inspect state, not change it.
+
 ## Translation rules
 
 - Preserve every `{placeholder}` exactly as written — same name, same braces.

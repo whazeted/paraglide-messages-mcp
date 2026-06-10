@@ -37,6 +37,14 @@ afterAll(async () => {
 	removeFixture(fixture.rootDir);
 });
 
+async function readJsonResource<T>(uri: string): Promise<T> {
+	const result = await client.readResource({ uri });
+	const first = result.contents[0];
+	expect(first?.mimeType).toBe("application/json");
+	if (!first || !("text" in first)) throw new Error("expected text contents");
+	return JSON.parse(first.text as string) as T;
+}
+
 async function callTool<T>(name: string, args: Record<string, unknown>): Promise<T> {
 	const result = await client.callTool({ name, arguments: args });
 	expect(result.isError ?? false).toBe(false);
@@ -187,6 +195,88 @@ describe("paraglide-mcp end to end", () => {
 		expect(text).toContain('targetLocale: "fr"');
 		expect(text).toContain("get_translation_batch");
 		expect(text).toContain("save_translations");
+	});
+
+	it("lists the static and per-locale resources", async () => {
+		const { resources } = await client.listResources();
+		const uris = resources.map((r) => r.uri);
+		expect(uris).toContain("paraglide://project/info");
+		// one missing-keys resource per project locale, from the template's list callback
+		expect(uris).toContain("paraglide://locales/en/missing");
+		expect(uris).toContain("paraglide://locales/de/missing");
+		expect(uris).toContain("paraglide://locales/fr/missing");
+	});
+
+	it("lists the resource templates", async () => {
+		const { resourceTemplates } = await client.listResourceTemplates();
+		expect(resourceTemplates.map((t) => t.uriTemplate).sort()).toEqual([
+			"paraglide://locales/{locale}/missing",
+			"paraglide://messages/{locale}/{key}",
+		]);
+	});
+
+	it("reads project info as a resource", async () => {
+		const info = await readJsonResource<{
+			baseLocale: string;
+			locales: string[];
+		}>("paraglide://project/info");
+		expect(info.baseLocale).toBe("en");
+		expect(info.locales).toEqual(["en", "de", "fr"]);
+	});
+
+	it("reads the missing keys for a locale", async () => {
+		// fr is still fully untranslated (the earlier fr save was rejected)
+		const fr = await readJsonResource<{
+			locale: string;
+			missing: number;
+			keys: string[];
+		}>("paraglide://locales/fr/missing");
+		expect(fr.locale).toBe("fr");
+		expect(fr.missing).toBe(6);
+		expect(fr.keys).toContain("greeting");
+
+		// de was fully translated by the batch-loop test above
+		const de = await readJsonResource<{ missing: number }>(
+			"paraglide://locales/de/missing"
+		);
+		expect(de.missing).toBe(0);
+	});
+
+	it("reads a single message value", async () => {
+		const data = await readJsonResource<unknown>(
+			"paraglide://messages/en/greeting"
+		);
+		expect(data).toEqual({
+			key: "greeting",
+			locale: "en",
+			value: "Hello {name}!",
+		});
+	});
+
+	it("errors on an unknown message key resource", async () => {
+		await expect(
+			client.readResource({ uri: "paraglide://messages/en/nope_does_not_exist" })
+		).rejects.toThrow(/unknown message key/);
+	});
+
+	it("completes resource template variables from the project", async () => {
+		const locales = await client.complete({
+			ref: {
+				type: "ref/resource",
+				uri: "paraglide://messages/{locale}/{key}",
+			},
+			argument: { name: "locale", value: "d" },
+		});
+		expect(locales.completion.values).toEqual(["de"]);
+
+		const keys = await client.complete({
+			ref: {
+				type: "ref/resource",
+				uri: "paraglide://messages/{locale}/{key}",
+			},
+			argument: { name: "key", value: "checkout_" },
+		});
+		expect(keys.completion.values).toContain("checkout_title");
 	});
 
 	it("completes locale and prefix prompt arguments from the project", async () => {
