@@ -1,0 +1,51 @@
+{
+	"name": "paraglide-mcp",
+	"version": "0.1.0",
+	"description": "MCP server for translating Paraglide JS / inlang projects in small, low-error batches",
+	"license": "MIT",
+	"type": "module",
+	"engines": {
+		"node": ">=20.0.0"
+	},
+	"bin": {
+		"paraglide-mcp": "./dist/cli.js"
+	},
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": "./dist/index.js"
+	},
+	"files": [
+		"dist",
+		"skill",
+		"README.md"
+	],
+	"keywords": [
+		"mcp",
+		"model-context-protocol",
+		"paraglide",
+		"inlang",
+		"i18n",
+		"translation"
+	],
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run --exclude 'test/e2e.test.ts'",
+		"test:e2e": "pnpm build && vitest run test/e2e.test.ts",
+		"test:all": "pnpm build && vitest run",
+		"prepublishOnly": "pnpm build"
+	},
+	"dependencies": {
+		"@inlang/plugin-message-format": "^4.4.0",
+		"@inlang/sdk": "^2.9.3",
+		"@modelcontextprotocol/sdk": "^1.29.0",
+		"flat": "^6.0.1",
+		"zod": "^3.25.0"
+	},
+	"devDependencies": {
+		"@types/node": "^22.0.0",
+		"typescript": "^5.7.0",
+		"vitest": "^3.2.0"
+	}
+}
