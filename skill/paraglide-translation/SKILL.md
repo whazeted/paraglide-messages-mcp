@@ -29,8 +29,7 @@ translate everything in one call.
 ## Translation rules
 
 - Preserve every `{placeholder}` exactly as written — same name, same braces.
-  Never translate, rename, or drop placeholder names. The server rejects
-  invented placeholders and warns about dropped ones.
+  Never translate, rename, or drop placeholder names.
 - Preserve markup tags like `{#bold}`/`{/bold}` and their nesting.
 - Simple messages are plain strings: `"Hello {name}!"` → `"Hallo {name}!"`.
 - Variant messages are a single-element array:
@@ -61,13 +60,5 @@ translate everything in one call.
   the message key and sibling keys (`get_messages` with a `prefix`) for
   context. If still ambiguous, make the safest choice and mention it in your
   summary instead of stalling.
-
-## Error handling
-
-- A failed item in `save_translations` never blocks the others — valid items
-  are saved. Re-save only the failed keys after fixing them.
-- "unknown message key" means you mistyped the key; copy keys verbatim from
-  `get_translation_batch`. Do not set `allowNewKeys` unless the user
-  explicitly asked to create new messages.
 - Never edit `messages/*.json` or `project.inlang/` files directly while the
   MCP server is in use — always go through the tools so validation applies.
