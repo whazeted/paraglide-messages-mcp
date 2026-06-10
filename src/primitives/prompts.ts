@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { completable } from "@modelcontextprotocol/sdk/server/completable.js";
 import { z } from "zod";
-import type { TranslationService } from "./service.js";
+import type { TranslationService } from "../core/service.js";
 
 /**
  * Registers the workflow prompts. Each renders a single user message that

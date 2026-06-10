@@ -63,6 +63,20 @@ launch them directly without the bundled skill:
 Locale and prefix arguments support MCP completion: locales are suggested from
 the project settings, prefixes from the actual message keys.
 
+## Resources
+
+Read-only project state is also exposed as MCP resources, so clients can pin
+it as context (e.g. `@`-mention in Claude Code) without spending tool calls:
+
+| Resource | Purpose |
+| --- | --- |
+| `paraglide://project/info` | Project overview — same payload as the `project_info` tool. |
+| `paraglide://locales/{locale}/missing` | All keys missing or empty in `{locale}`. One resource per project locale appears in the resource list. |
+| `paraglide://messages/{locale}/{key}` | The value of one message in one locale (`value` is `null` when untranslated). |
+
+All resources return JSON. The `{locale}` and `{key}` template variables
+support MCP completion, like the prompt arguments.
+
 ### The translation loop
 
 Agents translate iteratively — small batches keep the error rate low while

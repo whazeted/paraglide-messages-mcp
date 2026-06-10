@@ -1,11 +1,11 @@
 export { createServer, SERVER_VERSION } from "./server.js";
-export { TranslationService } from "./service.js";
+export { TranslationService } from "./core/service.js";
 export {
 	discoverProjectPath,
 	withProject,
 	saveProject,
 	pickPluginKey,
-} from "./project.js";
+} from "./core/project.js";
 export {
 	extractPlaceholders,
 	placeholdersOf,
@@ -13,5 +13,5 @@ export {
 	isComplexMessage,
 	isEmptyValue,
 	isValidMessageValue,
-} from "./format.js";
-export type * from "./types.js";
+} from "./core/format.js";
+export type * from "./core/types.js";

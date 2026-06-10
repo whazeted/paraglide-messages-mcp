@@ -1,4 +1,4 @@
-import type { MessageValue } from "../src/types.js";
+import type { MessageValue } from "../src/core/types.js";
 
 /**
  * Deterministic generator for varied English source messages: single words,
