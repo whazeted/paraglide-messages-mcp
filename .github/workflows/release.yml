@@ -1,0 +1,67 @@
+# Publishes to npm via OIDC trusted publishing (no NPM_TOKEN secret), then
+# syncs the release to the official MCP Registry.
+#
+# One-time setup (see "Releasing" in README.md):
+#   1. First release must be published locally (`pnpm build && npm publish`) —
+#      trusted publishers can only be configured for packages that already exist.
+#   2. On npmjs.com → package → Settings → add a GitHub Actions trusted
+#      publisher: org `WesHaze`, repo `paraglide-mcp`, workflow `release.yml`.
+#   3. Then set "Require two-factor authentication and disallow tokens".
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC: npm trusted publishing + MCP registry auth
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test:all
+
+      - name: Check tag matches package.json version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(jq -r .version package.json)"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "Tag v$TAG_VERSION does not match package.json version $PKG_VERSION" >&2
+            exit 1
+          fi
+
+      # npm >= 11.5.1 is required for OIDC trusted publishing
+      - run: npm install -g npm@latest
+      - run: npm publish
+
+      - name: Sync server.json version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > server.tmp
+          mv server.tmp server.json
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      # The MCP registry is still in preview — don't fail the npm release if it
+      # is unavailable; re-run `mcp-publisher publish` manually instead.
+      - name: Publish to MCP Registry
+        continue-on-error: true
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish

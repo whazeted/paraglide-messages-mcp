@@ -9,7 +9,6 @@
 		"declaration": true,
 		"sourceMap": true,
 		"outDir": "dist",
-		"rootDir": "src",
 		"skipLibCheck": true,
 		"esModuleInterop": true,
 		"forceConsistentCasingInFileNames": true,

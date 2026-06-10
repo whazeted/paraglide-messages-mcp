@@ -1,0 +1,20 @@
+{
+	"name": "paraglide-translation",
+	"description": "Translate Paraglide JS / inlang projects in small, validated batches via the paraglide-mcp server.",
+	"version": "0.1.0",
+	"author": {
+		"name": "Wessel Haze",
+		"url": "https://github.com/WesHaze"
+	},
+	"homepage": "https://github.com/WesHaze/paraglide-mcp",
+	"repository": "https://github.com/WesHaze/paraglide-mcp",
+	"license": "MIT",
+	"keywords": ["paraglide", "inlang", "i18n", "translation", "mcp"],
+	"skills": ["./skill/paraglide-translation"],
+	"mcpServers": {
+		"paraglide": {
+			"command": "npx",
+			"args": ["-y", "paraglide-mcp"]
+		}
+	}
+}
