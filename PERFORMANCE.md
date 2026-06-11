@@ -203,9 +203,9 @@ rest of the project:
    `get_messages`, `search_messages`, delete/rename) still load every locale.
 2. **Batch limits were raised for per-locale throughput**
    ([src/core/constants.ts](src/core/constants.ts)): default batch size 5 →
-   50, max batch/save size 25 → 200. Large batches are safe because
-   validation is per item — a bad translation is rejected individually, never
-   the whole call.
+   50, and the upper caps were later removed entirely. Large batches are safe
+   because validation is per item — a bad translation is rejected
+   individually, never the whole call.
 3. **Orchestration is now first-class**: the `translate_project` prompt (and
    the bundled skill) has the main agent settle a style brief — tone,
    per-language formality, glossary — *before* fanning out one subagent per

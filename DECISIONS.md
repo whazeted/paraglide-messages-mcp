@@ -79,7 +79,7 @@ alternative).
 
 ## 7. Large batches: default 50, max 200
 
-**2026-06-11 · active · supersedes 3**
+**2026-06-11 · superseded by 12 · supersedes 3**
 
 With per-item validation (decision 1), a bad item in a 200-message batch is
 rejected alone — large batches carry no correctness risk, and they cut both
@@ -135,3 +135,15 @@ not every Paraglide-adjacent project. Renamed to `paraglide-messages-mcp`
 to make the scope part of the name, added the MIT license file, and split
 the README into a minimal public-facing page with developer detail in
 [DEVELOPMENT.md](DEVELOPMENT.md) and this log.
+
+## 12. No batch size caps, default only
+
+**2026-06-11 · active · supersedes 7**
+
+The 200-item caps on `get_translation_batch`, `save_translations`, and
+`delete_messages` were dropped; only the default batch size of 50 remains.
+The caps were a holdover from the small-batch era (decision 3): per-item
+validation means a bad item never sinks a call regardless of size, and the
+caps only forced agents to split large runs into artificial chunks. Agents
+still steer the size themselves — raise it for short UI strings, drop to
+5–10 for long, nuanced prose.

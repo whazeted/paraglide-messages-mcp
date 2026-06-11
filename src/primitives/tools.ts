@@ -2,10 +2,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
 	DEFAULT_BATCH_SIZE,
-	MAX_BATCH_SIZE,
 	MAX_KEYS_LIMIT,
 	MAX_MESSAGES_LIMIT,
-	MAX_SAVE_BATCH,
 	MAX_SEARCH_LIMIT,
 } from "../core/constants.js";
 import type { TranslationService } from "../core/service.js";
@@ -211,7 +209,7 @@ export function registerTools(
 				"limited to a key prefix). Returns the source text, required placeholders, and the " +
 				"number of remaining untranslated messages. Workflow: call this, translate the items, " +
 				"save them with save_translations, then call this again until `done` is true. " +
-				`Default batch size is ${DEFAULT_BATCH_SIZE}; raise it (max ${MAX_BATCH_SIZE}) for short UI strings, ` +
+				`Default batch size is ${DEFAULT_BATCH_SIZE}; raise it for short UI strings, ` +
 				"drop to 5-10 for long, nuanced prose. Reads only the source and target locale " +
 				"files, so per-locale agents can run in parallel without touching each other's locales.",
 			inputSchema: {
@@ -228,7 +226,6 @@ export function registerTools(
 					.number()
 					.int()
 					.min(1)
-					.max(MAX_BATCH_SIZE)
 					.optional()
 					.describe(`messages per batch (default ${DEFAULT_BATCH_SIZE})`),
 			},
@@ -283,8 +280,7 @@ export function registerTools(
 						})
 					)
 					.min(1)
-					.max(MAX_SAVE_BATCH)
-					.describe(`translations to save (max ${MAX_SAVE_BATCH} per call)`),
+					.describe("translations to save"),
 				allowNewKeys: z
 					.boolean()
 					.optional()
@@ -341,10 +337,7 @@ export function registerTools(
 				keys: z
 					.array(z.string())
 					.min(1)
-					.max(MAX_SAVE_BATCH)
-					.describe(
-						`message keys to delete from all locales (max ${MAX_SAVE_BATCH} per call)`
-					),
+					.describe("message keys to delete from all locales"),
 			},
 			outputSchema: {
 				results: z.array(

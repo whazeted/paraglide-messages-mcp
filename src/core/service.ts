@@ -1,4 +1,3 @@
-import { MAX_SAVE_BATCH } from "./constants.js";
 import { parseDirectProject, readDirectLocale } from "./direct.js";
 import { isEmptyValue } from "./format.js";
 import {
@@ -124,11 +123,6 @@ export class TranslationService {
 		if (args.translations.length === 0) {
 			throw new Error("translations must not be empty");
 		}
-		if (args.translations.length > MAX_SAVE_BATCH) {
-			throw new Error(
-				`max ${MAX_SAVE_BATCH} translations per call — split larger runs into multiple calls`
-			);
-		}
 		// per-locale operation: reads base + target only, writes the target file
 		return mutateKeys(
 			this.projectPath,
@@ -147,11 +141,6 @@ export class TranslationService {
 	deleteMessages(args: { keys: string[] }): DeleteSummary {
 		if (args.keys.length === 0) {
 			throw new Error("keys must not be empty");
-		}
-		if (args.keys.length > MAX_SAVE_BATCH) {
-			throw new Error(
-				`max ${MAX_SAVE_BATCH} keys per call — split larger runs into multiple calls`
-			);
 		}
 		return mutateKeys(this.projectPath, (context) => {
 			const { deletions, summary } = planDeleteMessages(context, args.keys);
