@@ -1,0 +1,59 @@
+{
+	"category": "marketing",
+	"license": "MIT (original work)",
+	"attribution": "Original text authored for this fixture, 2026",
+	"sourceUrl": "https://github.com/WesHaze/paraglide-mcp",
+	"retrieved": "2026-06-11",
+	"paragraphs": [
+		{
+			"id": "marketing_original_001",
+			"chars": 315,
+			"text": "Meet Ledgerly, the bookkeeping platform that closes your books while you sleep. Connect your bank accounts, invoicing tools, and payroll provider once, and Ledgerly categorizes every transaction, reconciles every statement, and flags anything that needs a human eye. Month-end close goes from two weeks to two days."
+		},
+		{
+			"id": "marketing_original_002",
+			"chars": 256,
+			"text": "Your team already writes everything down. Quillstack just makes it findable. Our knowledge base learns the way your company actually talks, so when someone searches for \"expense policy\" they find the doc titled \"How we spend money\" — instantly, every time."
+		},
+		{
+			"id": "marketing_original_003",
+			"chars": 496,
+			"text": "Today we're shipping Workflows, the most requested feature in Brightmesh history. Workflows let you chain together triggers, conditions, and actions without writing a single line of code. When a customer upgrades their plan, you can now automatically update their billing record, notify the account manager in chat, and kick off a personalized onboarding sequence — all from one visual canvas. Workflows is available today on every paid plan, and existing automations migrate over with one click."
+		},
+		{
+			"id": "marketing_original_004",
+			"chars": 455,
+			"text": "Dashboards in Plotwise just got a major upgrade. You can now embed live charts anywhere your team works — paste a link into your wiki, your slide deck, or your weekly email, and the chart stays current without manual exports. We've also added scheduled snapshots, so stakeholders who prefer their metrics in their inbox get a pixel-perfect summary every Monday morning. Both features are rolling out to all workspaces this week, no configuration required."
+		},
+		{
+			"id": "marketing_original_005",
+			"chars": 524,
+			"text": "Pricing at Hatchloop is simple on purpose. Every plan includes unlimited projects, unlimited viewers, and our full automation engine — we only charge for people who actually build. Start free with up to three builders, upgrade to Team when you need granular permissions and priority support, and talk to us about Enterprise when single sign-on, audit logs, and a dedicated success manager become must-haves. No per-seat surprises, no feature hostage-taking, and you can change plans or cancel anytime from your billing page."
+		},
+		{
+			"id": "marketing_original_006",
+			"chars": 484,
+			"text": "Ferrowave started in a garage in Tampere with a soldering iron, a secondhand spectrum analyzer, and a stubborn belief that industrial sensors shouldn't cost more than the machines they monitor. Eight years later, our vibration and temperature sensors keep watch over paper mills, wind farms, and bottling lines on four continents. We're still engineers first: every sensor we ship is designed, tested, and calibrated in-house, and our founders still answer support tickets on Fridays."
+		},
+		{
+			"id": "marketing_original_007",
+			"chars": 1339,
+			"text": "Welcome to Driftboard! You've just created your first workspace, and we want to make sure your first week is a great one. Over the next few days, you'll receive a short series of emails like this one, each focused on a single habit that our most successful teams share. Today's habit is the simplest and the most important: bring your work in. Driftboard is only as useful as what's inside it, so start by importing one real project — not a test project, not a sandbox, but something your team is actually working on right now. Use the importer under Settings to pull in boards from your previous tool, or create a board from scratch with our quick-start templates for product launches, editorial calendars, and sprint planning. Once your project is in, invite the two or three people you collaborate with most. Teams that invite at least two colleagues in their first week are four times more likely to still be active in three months, and we suspect that's not a coincidence: planning tools work when the plan lives where everyone can see it. If you get stuck at any point, just reply to this email — a real human on our support team reads every response, usually within a couple of hours. Tomorrow we'll show you how to set up your first automation, which saves the average team about ninety minutes a week. Until then, happy importing!"
+		},
+		{
+			"id": "marketing_original_008",
+			"chars": 1271,
+			"text": "Your Sundial trial wraps up in three days, so this is a good moment to take stock of what your team has done. Since you signed up, your workspace has logged forty-two scheduling conflicts caught before they happened, eleven meetings automatically rescheduled across time zones, and roughly six hours of back-and-forth email that simply never needed to be written. Those numbers come straight from your workspace analytics, and you can dig into the details anytime under Reports. If Sundial has earned a place in your toolkit, upgrading takes about a minute: pick a plan, add a payment method, and everything stays exactly where it is — your calendars, your booking pages, your team's preferences, all untouched. If you're not ready, that's genuinely fine too. Your data stays safe and read-only for ninety days, so you can come back later without starting over, and you can export everything to a standard calendar format with one click whenever you like. And if the trial left you on the fence, we'd love to know why: there's a two-question survey linked below, and the product team reads every single answer in our Monday review. Whichever way you go, thanks for giving us three weeks of your team's attention. We know how scarce that is, and we tried to spend it well."
+		},
+		{
+			"id": "marketing_original_009",
+			"chars": 361,
+			"text": "Stop guessing which features your users actually want. Featherpoll drops a single, unobtrusive question into your product at exactly the right moment — after a user completes a task, hits a limit, or returns from a long absence — and turns the answers into a ranked roadmap your whole company can rally behind. Setup takes one script tag and about four minutes."
+		},
+		{
+			"id": "marketing_original_010",
+			"chars": 508,
+			"text": "When Cobblehill Coffee opened their fourth location, their inventory spreadsheet finally broke. Orders went missing, the Saturday roast sold out by nine, and the team spent Sunday nights reconciling counts by hand. Six weeks after switching to Stockpine, shrinkage was down a third, reordering happened automatically, and Sunday nights belonged to the staff again. We love stories like this — not because the numbers are dramatic, but because nobody at Cobblehill had to become a software expert to get them."
+		}
+	]
+}

@@ -51,7 +51,7 @@ translate every locale at once with one subagent per locale.
 | Tool | Purpose |
 | --- | --- |
 | `project_info` | Locales, base locale, per-locale translated/missing counts. |
-| `get_translation_batch` | Next batch of untranslated messages for a locale (default 50), with source text and required placeholders. |
+| `get_translation_batch` | Next batch of untranslated messages for a locale, with source text and required placeholders. Batches self-size: long prose yields fewer items per batch so each keeps the agent's full attention. |
 | `save_translations` | Validate and persist translations for one locale; per-item results. |
 | `list_message_keys` | Keys only, filterable by prefix and status, paginated. |
 | `get_messages` | Full message content by keys or prefix. |
@@ -113,3 +113,7 @@ the server. Measurements and history in [PERFORMANCE.md](PERFORMANCE.md).
 ## License
 
 [MIT](LICENSE)
+
+Not affiliated with or endorsed by [Opral](https://opral.com) / inlang —
+[Paraglide JS](https://github.com/opral/paraglide-js) is their project. The
+name refers to the message format this server supports.

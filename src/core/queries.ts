@@ -1,6 +1,8 @@
+import { outputTokensPerSourceChar, predictOutputTokens } from "./budget.js";
 import { isEmptyValue, patternsOf, placeholdersOf } from "./format.js";
 import {
 	DEFAULT_TRANSLATION_BATCH_SIZE,
+	DEFAULT_OUTPUT_TOKEN_BUDGET,
 	DEFAULT_LIST_KEYS_PAGE_SIZE,
 	DEFAULT_GET_MESSAGES_LIMIT,
 	DEFAULT_SEARCH_MESSAGES_LIMIT,
@@ -146,6 +148,7 @@ export function nextTranslationBatch(
 		sourceLocale?: string;
 		prefix?: string;
 		batchSize?: number;
+		maxOutputBudget?: number;
 	}
 ): {
 	targetLocale: string;
@@ -180,16 +183,34 @@ export function nextTranslationBatch(
 	});
 
 	const batchSize = Math.max(1, args.batchSize ?? DEFAULT_TRANSLATION_BATCH_SIZE);
-	const items: TranslationItem[] = pending.slice(0, batchSize).map((key) => {
+	const budget = args.maxOutputBudget ?? DEFAULT_OUTPUT_TOKEN_BUDGET;
+	// null until the locale has enough translations to measure its ratio;
+	// predictOutputTokens then falls back to the source's own token estimate
+	const coefficient =
+		budget > 0
+			? outputTokensPerSourceChar(snapshot, sourceLocale, targetLocale)
+			: null;
+
+	const items: TranslationItem[] = [];
+	let predictedTokens = 0;
+	for (const key of pending) {
+		if (items.length >= batchSize) break;
 		const source = snapshot[sourceLocale]![key]!;
+		const predicted = predictOutputTokens(source, coefficient);
+		// the budget can only end a batch, never empty it — a single message
+		// over budget still ships alone so the loop always makes progress
+		if (budget > 0 && items.length > 0 && predictedTokens + predicted > budget) {
+			break;
+		}
+		predictedTokens += predicted;
 		const existingTarget = snapshot[targetLocale]?.[key];
-		return {
+		items.push({
 			key,
 			source,
 			...(existingTarget !== undefined && { existingTarget }),
 			placeholders: placeholdersOf(source),
-		};
-	});
+		});
+	}
 
 	return {
 		targetLocale,

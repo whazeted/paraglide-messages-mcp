@@ -96,6 +96,7 @@ export class TranslationService {
 		sourceLocale?: string;
 		prefix?: string;
 		batchSize?: number;
+		maxOutputBudget?: number;
 	}): {
 		targetLocale: string;
 		sourceLocale: string;

@@ -1,0 +1,79 @@
+{
+	"category": "engineering",
+	"license": "Public domain (NASA/NIST, US government works) and CC BY-SA 4.0 (Wikipedia); see per-paragraph attribution",
+	"attribution": "NASA, NIST, and Wikipedia publications from 2025-07 through 2026-06; per-paragraph attribution records the publisher, title, and publication/revision date",
+	"sourceUrl": "https://www.nasa.gov/",
+	"retrieved": "2026-06-11",
+	"paragraphs": [
+		{
+			"id": "engineering_nasa_x59_001",
+			"chars": 225,
+			"text": "NASA’s experimental X-59 aircraft marked a major milestone Friday, June 5, when it flew faster than the speed of sound for the first time, setting the stage for demonstrating its quiet supersonic capabilities later this year.",
+			"attribution": "NASA, 'NASA's X-59 Aircraft Flies Supersonic for First Time', published 2026-06-05, public domain (US government work)",
+			"sourceUrl": "https://www.nasa.gov/aeronautics/x-59-first-supersonic-flight/"
+		},
+		{
+			"id": "engineering_nasa_x59_002",
+			"chars": 473,
+			"text": "For the last several months, the X-59 has been participating in an ongoing series of flights where the plane has been flying at a wide range of speeds and altitudes – a process known as envelope expansion. These tests are the first phase of the X-59’s flight testing. They are focused on performance and involve chase plane monitoring. When the aircraft completes this phase it will enter another, focused on its sound profile in order to verify its quiet thump capability.",
+			"attribution": "NASA, 'NASA's X-59 Aircraft Flies Supersonic for First Time', published 2026-06-05, public domain (US government work)",
+			"sourceUrl": "https://www.nasa.gov/aeronautics/x-59-first-supersonic-flight/"
+		},
+		{
+			"id": "engineering_nist_ionclock_003",
+			"chars": 630,
+			"text": "Optical clocks are typically evaluated on two levels — accuracy (how close a clock comes to measuring the ideal “true” time, also known as systematic uncertainty) and stability (how efficiently a clock can measure time, related to statistical uncertainty). This new record in accuracy comes out of 20 years of continuous improvement of the aluminum ion clock. Beyond its world-best accuracy, 41% greater than the previous record, this new clock is also 2.6 times more stable than any other ion clock. Reaching these levels has meant carefully improving every aspect of the clock, from the laser to the trap and the vacuum chamber.",
+			"attribution": "NIST, 'NIST Ion Clock Sets New Record for Most Accurate Clock in the World', published 2025-07-14, public domain (US government work)",
+			"sourceUrl": "https://www.nist.gov/news-events/news/2025/07/nist-ion-clock-sets-new-record-most-accurate-clock-world"
+		},
+		{
+			"id": "engineering_nist_ionclock_004",
+			"chars": 856,
+			"text": "But the aluminum ion is kind of shy, Marshall explained. Aluminum is difficult to probe and cool with lasers, both necessary techniques for atomic clocks. The research group therefore paired the aluminum ion with magnesium. Magnesium doesn’t have the beautiful ticking properties of aluminum, but it can be easily controlled with lasers. “This ‘buddy system’ for ions is called quantum logic spectroscopy,” said Willa Arthur-Dworschack, a graduate student on the project. The magnesium ion cools the aluminum ion, slowing it down. It also moves in tandem with its aluminum partner, and the state of the clock can be read out via the magnesium ion’s motion, making this a “quantum logic” clock. Even with this coordination, there was still an array of physical effects to characterize, said Daniel Rodriguez Castillo, also a graduate student on the project.",
+			"attribution": "NIST, 'NIST Ion Clock Sets New Record for Most Accurate Clock in the World', published 2025-07-14, public domain (US government work)",
+			"sourceUrl": "https://www.nist.gov/news-events/news/2025/07/nist-ion-clock-sets-new-record-most-accurate-clock-world"
+		},
+		{
+			"id": "engineering_nasa_artemis2_005",
+			"chars": 638,
+			"text": "During a planned multi-hour lunar flyby on Monday, April 6, the astronauts will take photographs and provide observations of the Moon’s surface as the first people to lay eyes on some areas of the far side. Although the lunar far side will only be partially illuminated during the flyby, the conditions should create shadows that stretch across the surface, enhancing relief and revealing depth, ridges, slopes and crater rims that are often difficult to detect under full illumination. Crew observations and other human health scientific investigations during the mission, such as AVATAR, will inform science during future Moon missions.",
+			"attribution": "NASA, 'Liftoff! NASA Launches Astronauts on Historic Artemis Moon Mission', release 26-026, published 2026-04-01, public domain (US government work)",
+			"sourceUrl": "https://www.nasa.gov/news-release/liftoff-nasa-launches-astronauts-on-historic-artemis-moon-mission/"
+		},
+		{
+			"id": "engineering_nasa_artemis2_006",
+			"chars": 465,
+			"text": "With astronauts aboard for the first time, engineers put Orion through a full in‑flight evaluation. The crew tested the spacecraft’s life support systems, confirming Orion can sustain humans in deep space. During several piloting demonstrations, crew members took manual control of the spacecraft, flying Orion to validate its handling and collect data that will guide future rendezvous and docking operations with human-rated landers during Artemis III and beyond.",
+			"attribution": "NASA, 'NASA Welcomes Record-Setting Artemis II Moonfarers Back to Earth', release 26-030, published 2026-04-10, public domain (US government work)",
+			"sourceUrl": "https://www.nasa.gov/news-release/nasa-welcomes-record-setting-artemis-ii-moonfarers-back-to-earth/"
+		},
+		{
+			"id": "engineering_nasa_escapade_007",
+			"chars": 516,
+			"text": "In the next few minutes, the rocket will undergo a series of events, including stage separation, where the first stage separates from the second stage and autonomously descend to a landing platform, named Jaclyn, located 620 miles downrange in the Atlantic Ocean. Shortly after separation, the second stage’s two BE-3Us, liquid oxygen/liquid hydrogen engines, will ignite and propel the stage further into space, followed by fairing separation and deployment of the two ESCAPADE spacecraft into a medium Earth orbit.",
+			"attribution": "NASA, 'Liftoff! NASA's ESCAPADE Begins Journey to Mars', published 2025-11-13, public domain (US government work)",
+			"sourceUrl": "https://science.nasa.gov/blogs/escapade/2025/11/13/liftoff-nasas-escapade-begins-journey-to-mars/"
+		},
+		{
+			"id": "engineering_wiki_newglenn_008",
+			"chars": 1202,
+			"text": "The vehicle itself, and the high-level specifications, were initially publicly unveiled in September 2016. New Glenn was described as a 7 m (23 ft) diameter, two- or three-stage rocket, with the first and second stages being liquid methane/liquid oxygen (methalox) designs using Blue Origin engines. The first stage is planned to be reusable and will land vertically, just like the New Shepard suborbital launch vehicle that has been flying suborbitally since the mid-2010s. Although these plans would subsequently change, the 2016 plans called for the first stage to be powered by seven of Blue Origin's BE-4 single-shaft oxygen-rich staged combustion liquid methane/liquid oxygen rocket engines, the second-stage to be powered by a single vacuum-variant of the BE-4 (BE-4U) and the third stage to use a single BE-3 hydrolox engine. In 2016, the first stage was planned to be designed to be reused for up to 100 flights. Blue Origin announced that they intended to launch the rocket from Launch Complex 36 (LC-36), and manufacture the launch vehicles at a new facility to be built on nearby land in Exploration Park. Acceptance testing of the BE-4 engines was also announced to be planned for Florida.",
+			"attribution": "Wikipedia, 'New Glenn', revision 1358674577 (2026-06-10), CC BY-SA 4.0",
+			"sourceUrl": "https://en.wikipedia.org/wiki/New_Glenn"
+		},
+		{
+			"id": "engineering_wiki_newglenn_009",
+			"chars": 713,
+			"text": "In parallel, Blue Origin evaluated several possible reusable-stage architectures, including a winged stage that would reenter as a spaceplane, an aerospike engine concept in which the engine would also serve as a heat shield, and a high-drag design using flaps and a thermal protection system similar in broad concept to SpaceX Starship. In September 2024, Bezos said Blue Origin had a design for a reusable second stage and was developing its thermal protection system, but was still assessing whether aluminum or stainless steel should be used. He also said the company was continuing work on a cheaper expendable second stage and could abandon second-stage reuse if an expendable design proved more economical.",
+			"attribution": "Wikipedia, 'New Glenn', revision 1358674577 (2026-06-10), CC BY-SA 4.0",
+			"sourceUrl": "https://en.wikipedia.org/wiki/New_Glenn"
+		},
+		{
+			"id": "engineering_wiki_artemis2_010",
+			"chars": 1410,
+			"text": "Artemis II's mission was a crewed flight test with four astronauts evaluating the performance of the Space Launch System (SLS) rocket along with the Orion spacecraft and its European Service Module (ESM) in deep space. The first day of the mission was spent largely in high Earth orbit, where the crew conducted system checkouts. Orion operated in a highly elliptical, high Earth orbit with a period of roughly 24 hours, allowing extended testing of onboard systems. During this phase, the crew evaluated life support and other critical spacecraft systems, and performed a rendezvous and proximity operations demonstration using the spent Interim Cryogenic Propulsion Stage (ICPS) as a target. After NASA mission managers confirmed Orion's performance, the spacecraft executed a trans-lunar injection (TLI) burn to depart Earth orbit. Orion then traveled toward the Moon on a free-return trajectory, looping around the far side before naturally returning toward Earth on a free-return trajectory without requiring additional propulsion for the return leg. Notably, the crew received \"wake-up calls\" from Mission Control on every day of the flight, a NASA tradition since the Apollo missions, consisting of music designed to keep the crew on a steady rhythm and boost morale, and inspirational speeches recorded specifically for the flight, including messages from Apollo astronauts Charlie Duke and Jim Lovell.",
+			"attribution": "Wikipedia, 'Artemis II', revision 1358744713 (2026-06-10), CC BY-SA 4.0",
+			"sourceUrl": "https://en.wikipedia.org/wiki/Artemis_II"
+		}
+	]
+}

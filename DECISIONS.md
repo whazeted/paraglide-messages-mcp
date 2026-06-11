@@ -162,6 +162,66 @@ direction and its effect instead: raising the batch size means fewer
 round-trips (short UI strings); lowering it gives each item more of the
 agent's attention (long, nuanced prose).
 
+## 14. Predicted-output-token batch budget, self-calibrating
+
+**2026-06-11 · active · extends 12, 13**
+
+Thesis revisited: "smaller batches mean more attention per item." The real
+mechanism is that quality degrades with how much a model must *generate* in
+one response — output, not input. Long-context agent models don't change
+this: reading is cheap, but deep into a long emission translations drift
+formulaic, and a `max_tokens` truncation mid-JSON fails the whole save. The
+server's batch is the unit an agent translates in one generation, so batch
+sizing is the lever that shapes per-generation output.
+
+Decided: a batch ends at `batchSize` items **or** a predicted-output-token
+budget, whichever comes first — default-on, overridable, `0` disables
+(escapable, per decision 13's philosophy). Count-only ordering is kept
+(alphabetical = prefix locality, so related keys still travel together);
+a length *sort* was rejected for destroying exactly that locality.
+
+Prediction: source chars × a coefficient (output tokens per source char).
+Exact tokens are impossible in principle — the server can't know the client
+model's tokenizer — but BPE tokenizers agree on per-script densities, so a
+character-class estimate is within ~15%. The coefficient is measured from
+the locale's own translations (median per-key ratio, ≥ 100 translated keys)
+instead of parsing locale tags, which are arbitrary strings (`english.json`
+is valid). Below the threshold the prediction falls back to the source
+text's own estimated tokens — a conservative floor measured from data in
+hand (translations are rarely shorter than their source in token terms),
+not a guess about the target language. A flat per-language coefficient
+table was considered and rejected; so was count-only batching before
+calibration, which left exactly the cold-start prose batch — the case the
+feature exists for — unprotected, and made `maxOutputBudget` a silent no-op
+until calibration. The calibration feedback loop is self-correcting
+(verbose translations → higher coefficient → smaller batches), confined to
+batch sizing, never to content.
+
+Effect: short-UI-string projects still fill the full batch size; prose-heavy
+projects get small batches from the very first call, with the prediction
+tightening to the measured ratio once the locale crosses the threshold.
+
+Supporting research for "quality degrades with output length, not input
+length":
+
+- [LongProc (Ye et al., 2025)](https://arxiv.org/abs/2501.05414) — models
+  with 32k+ context windows degrade sharply on *procedural generation*
+  (structured long-form output, the closest shape to a translation batch):
+  open-weight models falter at ~2k output tokens, frontier models by 8k.
+- [LongWriter (Bai et al., ICLR 2025)](https://arxiv.org/abs/2408.07055) —
+  effective generation length is bounded by the output lengths seen in
+  alignment training (mostly < 2k words), independent of how much the model
+  can read; long-output training lifts the bound.
+- [HelloBench (Que et al., 2024)](https://arxiv.org/abs/2409.16191) —
+  open-ended long-form generation shows repetition and quality decay well
+  before hard output limits.
+- Document-level MT specifically:
+  [Translation Mixed-Instructions (Li et al., 2024)](https://arxiv.org/abs/2401.08088)
+  finds translation quality collapses past ~512–2048 input-output tokens per
+  call (models drift to summarizing instead of translating), and
+  [book-length MT evaluation (2025)](https://arxiv.org/html/2509.17249v1)
+  observes sharp degradation at 4k–8k.
+
 ## 15. Empirical calibration method for the output-token budget
 
 **2026-06-11 · active · extends 14**
