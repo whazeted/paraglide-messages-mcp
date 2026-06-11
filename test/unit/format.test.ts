@@ -141,6 +141,20 @@ describe("validateTranslation", () => {
 		expect(result.errors).toEqual([]);
 	});
 
+	it("does not count declarations as used placeholders", () => {
+		const translation = [
+			{
+				declarations: ["input count"],
+				match: {
+					"count=*": "Nachrichten",
+				},
+			},
+		];
+		const result = validateTranslation("{count} messages", translation);
+		expect(result.errors).toEqual([]);
+		expect(result.warnings.some((w) => w.includes("{count}"))).toBe(true);
+	});
+
 	it("rejects match conditions with undeclared selectors", () => {
 		const translation = [
 			{

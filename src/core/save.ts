@@ -6,12 +6,7 @@ import {
 } from "./format.js";
 import { unknownLocaleError } from "./queries.js";
 import { collectKeys, type ProjectSnapshot } from "./storage.js";
-import type {
-	MessagesSnapshot,
-	MessageValue,
-	SaveResultItem,
-	TranslationInput,
-} from "./types.js";
+import type { MessageValue, SaveResultItem, TranslationInput } from "./types.js";
 
 /** Validation and result-building for save_translations. */
 
@@ -42,12 +37,12 @@ export function validateBatch(
 	}
 ): { results: SaveResultItem[]; accepted: Record<string, MessageValue> } {
 	const { baseLocale, locales, snapshot } = context;
-	const allKeys = collectKeys(snapshot);
 
 	const targetLocale = args.targetLocale;
 	if (!locales.includes(targetLocale)) {
 		throw unknownLocaleError(targetLocale, locales);
 	}
+	const allKeys = args.allowNewKeys ? undefined : collectKeys(snapshot);
 
 	const results: SaveResultItem[] = [];
 	const accepted: Record<string, MessageValue> = {};
@@ -64,7 +59,7 @@ export function validateBatch(
 		}
 		seen.add(item.key);
 
-		if (!allKeys.has(item.key) && !args.allowNewKeys) {
+		if (allKeys && !allKeys.has(item.key)) {
 			results.push({
 				key: item.key,
 				status: "error",
@@ -128,15 +123,17 @@ export function summarizeSave(
 	results: SaveResultItem[],
 	accepted: Record<string, MessageValue>
 ): SaveSummary {
-	const after: MessagesSnapshot = {
-		...context.snapshot,
-		[targetLocale]: { ...context.snapshot[targetLocale], ...accepted },
+	const baseMessages = context.snapshot[context.baseLocale] ?? {};
+	const targetMessages = {
+		...context.snapshot[targetLocale],
+		...accepted,
 	};
-	const remainingForLocale = [...collectKeys(after)].filter((key) => {
-		const source = after[context.baseLocale]?.[key];
-		if (isEmptyValue(source)) return false;
-		return isEmptyValue(after[targetLocale]?.[key]);
-	}).length;
+	const remainingForLocale = Object.entries(baseMessages).filter(
+		([key, source]) => {
+			if (isEmptyValue(source)) return false;
+			return isEmptyValue(targetMessages[key]);
+		}
+	).length;
 
 	const saved = results.filter((r) => r.status === "saved").length;
 	return {

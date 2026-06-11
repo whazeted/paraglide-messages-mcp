@@ -83,22 +83,38 @@ export function patternsOf(value: MessageValue): string[] {
  * including selector variables of complex messages.
  */
 export function placeholdersOf(value: MessageValue): string[] {
-	const result = new Set<string>();
+	return [
+		...messageReferencesOf(value, { includeInputDeclarations: true }).variables,
+	].sort();
+}
+
+function messageReferencesOf(
+	value: MessageValue,
+	options?: { includeInputDeclarations?: boolean }
+): {
+	variables: Set<string>;
+	markup: Set<string>;
+} {
+	const variables = new Set<string>();
+	const markup = new Set<string>();
+
 	for (const pattern of patternsOf(value)) {
-		for (const variable of extractPlaceholders(pattern).variables) {
-			result.add(variable);
-		}
+		const placeholders = extractPlaceholders(pattern);
+		for (const variable of placeholders.variables) variables.add(variable);
+		for (const tag of placeholders.markup) markup.add(tag);
 	}
-	if (isComplexMessage(value)) {
+
+	if (options?.includeInputDeclarations !== false && isComplexMessage(value)) {
 		for (const spec of value) {
 			for (const declaration of spec?.declarations ?? []) {
 				if (declaration.startsWith("input ")) {
-					result.add(declaration.slice("input ".length).trim());
+					variables.add(declaration.slice("input ".length).trim());
 				}
 			}
 		}
 	}
-	return [...result].sort();
+
+	return { variables, markup };
 }
 
 export interface ValidationResult {
@@ -130,10 +146,13 @@ export function validateTranslation(
 		return { errors: [messageValueError(translation)], warnings };
 	}
 
-	const sourceVariables = new Set(placeholdersOf(source));
-	const sourceMarkup = new Set(
-		patternsOf(source).flatMap((p) => extractPlaceholders(p).markup)
-	);
+	const sourceReferences = messageReferencesOf(source, {
+		includeInputDeclarations: true,
+	});
+	const sourceVariables = sourceReferences.variables;
+	const sourceMarkup = sourceReferences.markup;
+	const sourcePlaceholders =
+		[...sourceVariables].sort().map((v) => `{${v}}`).join(", ") || "none";
 
 	// selectors of a complex translation count as known variables
 	const knownVariables = new Set(sourceVariables);
@@ -143,7 +162,8 @@ export function validateTranslation(
 			errors.push('complex message must contain a "match" object');
 			return { errors, warnings };
 		}
-		if (Object.keys(spec.match).length === 0) {
+		const matchKeys = Object.keys(spec.match);
+		if (matchKeys.length === 0) {
 			errors.push('"match" must contain at least one variant');
 		}
 		for (const declaration of spec.declarations ?? []) {
@@ -151,7 +171,7 @@ export function validateTranslation(
 			if (name) knownVariables.add(name);
 		}
 		// selector keys used in match conditions must be declared somewhere
-		for (const matchKey of Object.keys(spec.match)) {
+		for (const matchKey of matchKeys) {
 			for (const condition of matchKey.split(",")) {
 				const selector = condition.split("=")[0]?.trim();
 				if (selector && !knownVariables.has(selector)) {
@@ -164,43 +184,58 @@ export function validateTranslation(
 		}
 	}
 
-	const usedVariables = new Set<string>();
-	const usedMarkup = new Set<string>();
-	for (const pattern of patternsOf(translation)) {
-		const { variables, markup } = extractPlaceholders(pattern);
-		for (const v of variables) usedVariables.add(v);
-		for (const m of markup) usedMarkup.add(m);
-	}
+	const usedReferences = messageReferencesOf(translation, {
+		includeInputDeclarations: false,
+	});
+	const usedVariables = usedReferences.variables;
+	const usedMarkup = usedReferences.markup;
 
-	for (const variable of usedVariables) {
-		if (!knownVariables.has(variable)) {
-			errors.push(
-				`placeholder {${variable}} does not exist in the source message ` +
-					`(source placeholders: ${[...sourceVariables].map((v) => `{${v}}`).join(", ") || "none"})`
-			);
-		}
-	}
+	validateReferences({
+		used: usedVariables,
+		known: knownVariables,
+		required: sourceVariables,
+		errors,
+		warnings,
+		unknownMessage: (variable) =>
+			`placeholder {${variable}} does not exist in the source message ` +
+			`(source placeholders: ${sourcePlaceholders})`,
+		missingMessage: (variable) =>
+			`source placeholder {${variable}} is not used in the translation`,
+	});
 
-	for (const variable of sourceVariables) {
-		if (!usedVariables.has(variable)) {
-			warnings.push(
-				`source placeholder {${variable}} is not used in the translation`
-			);
-		}
-	}
-
-	for (const tag of usedMarkup) {
-		if (!sourceMarkup.has(tag)) {
-			errors.push(`markup ${tag} does not exist in the source message`);
-		}
-	}
-	for (const tag of sourceMarkup) {
-		if (!usedMarkup.has(tag)) {
-			warnings.push(`source markup ${tag} is not used in the translation`);
-		}
-	}
+	validateReferences({
+		used: usedMarkup,
+		known: sourceMarkup,
+		required: sourceMarkup,
+		errors,
+		warnings,
+		unknownMessage: (tag) => `markup ${tag} does not exist in the source message`,
+		missingMessage: (tag) => `source markup ${tag} is not used in the translation`,
+	});
 
 	return { errors, warnings };
+}
+
+function validateReferences(options: {
+	used: ReadonlySet<string>;
+	known: ReadonlySet<string>;
+	required: ReadonlySet<string>;
+	errors: string[];
+	warnings: string[];
+	unknownMessage: (value: string) => string;
+	missingMessage: (value: string) => string;
+}): void {
+	for (const value of options.used) {
+		if (!options.known.has(value)) {
+			options.errors.push(options.unknownMessage(value));
+		}
+	}
+
+	for (const value of options.required) {
+		if (!options.used.has(value)) {
+			options.warnings.push(options.missingMessage(value));
+		}
+	}
 }
 
 export function isValidMessageValue(value: unknown): value is MessageValue {
