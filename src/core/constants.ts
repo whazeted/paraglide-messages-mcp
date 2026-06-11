@@ -5,14 +5,20 @@
  * The SKILL could drift from these constants so keep that in mind.
  */
 
-/** Default translate batch size — small on purpose: accuracy beats batch size. */
-export const DEFAULT_BATCH_SIZE = 5;
+/**
+ * Default translate batch size. Sized for per-locale throughput (one agent —
+ * or subagent — owns a whole locale): validation is per-item, so a bad
+ * translation in a large batch is rejected individually instead of sinking
+ * the call. Drop to ~5-10 manually for long, tricky prose where accuracy
+ * needs the agent's full attention.
+ */
+export const DEFAULT_BATCH_SIZE = 50;
 
 /** Max messages per get_translation_batch call. */
-export const MAX_BATCH_SIZE = 25;
+export const MAX_BATCH_SIZE = 200;
 
 /** Max translations per save_translations call. */
-export const MAX_SAVE_BATCH = 25;
+export const MAX_SAVE_BATCH = 200;
 
 /** Default/max page size for list_message_keys. */
 export const DEFAULT_KEYS_LIMIT = 100;

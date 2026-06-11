@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
 	COMPLETION_LIMIT,
 	DEFAULT_BATCH_SIZE,
+	MAX_BATCH_SIZE,
 	MAX_SAVE_BATCH,
 } from "../core/constants.js";
 import type { TranslationService } from "../core/service.js";
@@ -94,6 +95,28 @@ export function registerPrompts(
 	);
 
 	server.registerPrompt(
+		"translate_project",
+		{
+			title: "Translate the whole project (one subagent per locale)",
+			description:
+				"Translate all missing messages of every target locale by fanning out one subagent " +
+				"per locale. The main agent settles a style brief first and hands it to every subagent, " +
+				"so all locales share tone, formality choices, and terminology.",
+			argsSchema: {
+				locales: optionalLocaleArg(
+					"comma-separated target locales (default: every locale with missing messages)"
+				),
+				prefix: optionalPrefixArg(
+					"optional key prefix to scope the run, e.g. 'checkout_'"
+				),
+			},
+		},
+		({ locales, prefix }) => ({
+			messages: userMessage(orchestrateWorkflow({ locales, prefix })),
+		})
+	);
+
+	server.registerPrompt(
 		"review_locale",
 		{
 			title: "Review a locale",
@@ -138,15 +161,50 @@ function translateWorkflow(args: {
 		.filter(Boolean)
 		.join(", ");
 
-	return `Translate ${scope} into "${args.targetLocale}" using the paraglide-mcp tools. You are the translator; the server provides the messages and validates + writes your translations.
+	return `Translate ${scope} into "${args.targetLocale}" using the paraglide-messages-mcp tools. You are the translator; the server provides the messages and validates + writes your translations.
 
 Workflow:
 1. Call project_info to confirm the locale and see how many messages are missing.
 2. Loop until \`done\` is true:
-   a. Call get_translation_batch with { ${batchArgs} }. Keep the default batchSize of ${DEFAULT_BATCH_SIZE}; use up to ${DEFAULT_BATCH_SIZE * 2} only for very short UI strings.
+   a. Call get_translation_batch with { ${batchArgs} }. Use the default batchSize of ${DEFAULT_BATCH_SIZE}; raise it (up to ${MAX_BATCH_SIZE}) for short UI strings, or drop to 5-10 for long, nuanced prose.
    b. Translate each item's \`source\` into the target locale, preserving every placeholder listed in \`placeholders\`.
    c. Call save_translations with the same keys. Check \`results\` for per-item errors, fix only the failed items, and re-save them before moving on.
 3. When \`remaining\` is 0, report a short summary (how many messages, which scope) and suggest running the Paraglide compile step (usually part of dev/build).
+
+${TRANSLATION_RULES}`;
+}
+
+function orchestrateWorkflow(args: {
+	locales?: string;
+	prefix?: string;
+}): string {
+	const targets = args.locales
+		? `the target locales ${args.locales}`
+		: "every target locale that has missing messages";
+	const scope = args.prefix
+		? ` (only keys starting with "${args.prefix}")`
+		: "";
+	const subagentBatchArgs = [
+		'targetLocale: "<locale>"',
+		`batchSize: ${DEFAULT_BATCH_SIZE}`,
+		args.prefix ? `prefix: "${args.prefix}"` : null,
+	]
+		.filter(Boolean)
+		.join(", ");
+
+	return `Translate all missing messages${scope} into ${targets} using the paraglide-messages-mcp tools, with one subagent per locale running in parallel. You are the orchestrator: you decide the style once, delegate the translation, and verify the result. Locales live in separate files and the translate tools only read/write the source and target locale, so per-locale subagents cannot interfere with each other.
+
+Workflow:
+1. Call project_info for the base locale, target locales, and per-locale missing counts. Skip locales with 0 missing messages.
+2. Settle the style brief BEFORE delegating. Sample representative messages (get_messages with a few prefixes) to learn the product's voice, then write a short brief covering:
+   - tone and voice (e.g. friendly but concise product UI),
+   - formality/address per target language where the language forces a choice (e.g. German Sie vs. du, Dutch u vs. je, formal vs. plain Japanese),
+   - a glossary of recurring product terms that must stay consistent (and which terms stay untranslated, e.g. brand names),
+   - the non-negotiables: preserve {placeholder} names and markup tags exactly; adapt variant match cases to the language's plural rules.
+   Ask the user for style preferences when unclear; otherwise decide yourself and state the brief in your summary.
+3. Spawn one subagent per target locale, all in parallel. Give each subagent: the style brief verbatim, its single target locale, and these instructions — loop until \`done\` is true: call get_translation_batch with { ${subagentBatchArgs} } (drop batchSize to 5-10 for long, nuanced prose), translate every item preserving its \`placeholders\`, save with save_translations, fix per-item errors from \`results\` and re-save only those before continuing. Translate only your own locale; never touch others.
+4. When all subagents are done, call project_info again and confirm \`missing\` is 0 for every target locale${args.prefix ? " (within the prefix, via list_message_keys)" : ""}. Re-dispatch a subagent for any locale that still has missing messages.
+5. Report a summary: the style brief you used, per-locale message counts, anything subagents flagged as ambiguous, and suggest running the Paraglide compile step (usually part of dev/build).
 
 ${TRANSLATION_RULES}`;
 }

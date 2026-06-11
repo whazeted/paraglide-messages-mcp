@@ -1,6 +1,6 @@
 {
 	"name": "paraglide-translation",
-	"description": "Translate Paraglide JS / inlang projects in small, validated batches via the paraglide-mcp server.",
+	"description": "Translate Paraglide JS / inlang message files via the paraglide-messages-mcp server — validated saves, one parallel agent per locale.",
 	"version": "0.1.0",
 	"author": {
 		"name": "Wessel Haze",
@@ -14,7 +14,7 @@
 	"mcpServers": {
 		"paraglide": {
 			"command": "npx",
-			"args": ["-y", "paraglide-mcp"]
+			"args": ["-y", "paraglide-messages-mcp"]
 		}
 	}
 }

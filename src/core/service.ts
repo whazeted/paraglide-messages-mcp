@@ -22,7 +22,7 @@ import {
 	type RenameSummary,
 } from "./mutate.js";
 import { validateBatch, summarizeSave, type SaveSummary } from "./save.js";
-import { createStorage } from "./storage.js";
+import { mutateKeys, readSnapshot } from "./storage.js";
 import type {
 	MessageValue,
 	ProjectInfo,
@@ -31,145 +31,152 @@ import type {
 } from "./types.js";
 
 /**
- * The operations behind the MCP tools, as a thin facade: each call resolves
- * the project storage (direct JSON files or the inlang SDK — see storage.ts),
- * loads a fresh snapshot, and delegates to the pure logic in queries.ts and
- * save.ts. Nothing is held between calls, so the server stays stateless and
+ * The operations behind the MCP tools, as a thin facade: each call loads a
+ * fresh snapshot straight from the project's message files (see storage.ts /
+ * direct.ts) and delegates to the pure logic in queries.ts and save.ts.
+ * Every method is synchronous on purpose: a call runs atomically on the
+ * event loop, so concurrent per-locale agents can never observe or produce
+ * a half-applied operation. No translation state is held between calls —
+ * file reads are served through a stat-validated cache (direct.ts), so
  * external edits are always picked up.
  */
 export class TranslationService {
 	constructor(public readonly projectPath: string) {}
 
-	async projectInfo(): Promise<ProjectInfo> {
-		const context = await createStorage(this.projectPath).read();
-		return computeProjectInfo(this.projectPath, context);
+	projectInfo(): ProjectInfo {
+		return computeProjectInfo(this.projectPath, readSnapshot(this.projectPath));
 	}
 
-	async listKeys(args: {
+	listKeys(args: {
 		prefix?: string;
 		locale?: string;
 		status?: "all" | "missing" | "translated";
 		limit?: number;
 		after?: string;
-	}): Promise<{
+	}): {
 		keys: string[];
 		total: number;
 		hasMore: boolean;
 		nextCursor?: string;
-	}> {
-		const context = await createStorage(this.projectPath).read();
-		return queryKeys(context, args);
+	} {
+		return queryKeys(readSnapshot(this.projectPath), args);
 	}
 
-	async getMessages(args: {
+	getMessages(args: {
 		keys?: string[];
 		prefix?: string;
 		locales?: string[];
 		limit?: number;
-	}): Promise<{
+	}): {
 		messages: Array<{
 			key: string;
 			translations: Record<string, MessageValue | null>;
 		}>;
 		truncated: boolean;
-	}> {
+	} {
 		if (!args.keys?.length && args.prefix === undefined) {
 			throw new Error("provide either keys or a prefix");
 		}
-		const context = await createStorage(this.projectPath).read();
-		return queryMessages(context, args);
+		return queryMessages(readSnapshot(this.projectPath), args);
 	}
 
-	async searchMessages(args: {
+	searchMessages(args: {
 		query: string;
 		locales?: string[];
 		limit?: number;
-	}): Promise<{
+	}): {
 		results: SearchResult[];
 		total: number;
 		truncated: boolean;
-	}> {
-		const context = await createStorage(this.projectPath).read();
-		return searchMessages(context, args);
+	} {
+		return searchMessages(readSnapshot(this.projectPath), args);
 	}
 
-	async getTranslationBatch(args: {
+	getTranslationBatch(args: {
 		targetLocale: string;
 		sourceLocale?: string;
 		prefix?: string;
 		batchSize?: number;
-	}): Promise<{
+	}): {
 		targetLocale: string;
 		sourceLocale: string;
 		items: TranslationItem[];
 		remaining: number;
 		done: boolean;
-	}> {
-		const context = await createStorage(this.projectPath).read();
+	} {
+		// per-locale operation: only the source and target files are loaded,
+		// so concurrent per-locale agents never read each other's locales
+		const context = readSnapshot(this.projectPath, {
+			onlyLocales: [
+				args.targetLocale,
+				...(args.sourceLocale ? [args.sourceLocale] : []),
+			],
+		});
 		return nextTranslationBatch(context, args);
 	}
 
-	async saveTranslations(args: {
+	saveTranslations(args: {
 		targetLocale: string;
 		translations: TranslationInput[];
 		allowNewKeys?: boolean;
 		skipValidation?: boolean;
-	}): Promise<SaveSummary> {
+	}): SaveSummary {
 		if (args.translations.length === 0) {
 			throw new Error("translations must not be empty");
 		}
 		if (args.translations.length > MAX_SAVE_BATCH) {
 			throw new Error(
-				`max ${MAX_SAVE_BATCH} translations per call — translate in small batches to keep error rates low`
+				`max ${MAX_SAVE_BATCH} translations per call — split larger runs into multiple calls`
 			);
 		}
-		return await createStorage(this.projectPath).mutateKeys((context) => {
-			const { results, accepted } = validateBatch(context, args);
-			return {
-				deletions: [],
-				additions: { [args.targetLocale]: accepted },
-				result: summarizeSave(context, args.targetLocale, results, accepted),
-			};
-		});
+		// per-locale operation: reads base + target only, writes the target file
+		return mutateKeys(
+			this.projectPath,
+			(context) => {
+				const { results, accepted } = validateBatch(context, args);
+				return {
+					deletions: [],
+					additions: { [args.targetLocale]: accepted },
+					result: summarizeSave(context, args.targetLocale, results, accepted),
+				};
+			},
+			{ onlyLocales: [args.targetLocale] }
+		);
 	}
 
-	async deleteMessages(args: { keys: string[] }): Promise<DeleteSummary> {
+	deleteMessages(args: { keys: string[] }): DeleteSummary {
 		if (args.keys.length === 0) {
 			throw new Error("keys must not be empty");
 		}
 		if (args.keys.length > MAX_SAVE_BATCH) {
 			throw new Error(
-				`max ${MAX_SAVE_BATCH} keys per call — delete in small batches to keep error rates low`
+				`max ${MAX_SAVE_BATCH} keys per call — split larger runs into multiple calls`
 			);
 		}
-		return await createStorage(this.projectPath).mutateKeys((context) => {
+		return mutateKeys(this.projectPath, (context) => {
 			const { deletions, summary } = planDeleteMessages(context, args.keys);
 			return { deletions, additions: {}, result: summary };
 		});
 	}
 
-	async renameMessage(args: {
+	renameMessage(args: {
 		key: string;
 		newKey: string;
-	}): Promise<RenameSummary> {
-		return await createStorage(this.projectPath).mutateKeys((context) => {
+	}): RenameSummary {
+		return mutateKeys(this.projectPath, (context) => {
 			const { additions, summary } = planRenameMessage(context, args);
 			return { deletions: [args.key], additions, result: summary };
 		});
 	}
 
-	async addLocale(args: { locale: string }): Promise<AddLocaleResult> {
+	addLocale(args: { locale: string }): AddLocaleResult {
 		return addLocale(this.projectPath, args.locale);
 	}
 
-	async removeLocale(args: { locale: string }): Promise<RemoveLocaleResult> {
-		// count what is being discarded while the locale is still readable —
-		// one file read when the location is known, full project read otherwise
+	removeLocale(args: { locale: string }): RemoveLocaleResult {
+		// count what is being discarded while the locale is still readable
 		const tag = args.locale.trim();
-		const direct = parseDirectProject(this.projectPath);
-		const messages = direct
-			? readDirectLocale(direct, tag)
-			: ((await createStorage(this.projectPath).read()).snapshot[tag] ?? {});
+		const messages = readDirectLocale(parseDirectProject(this.projectPath), tag);
 		const discardedTranslations = Object.values(messages).filter(
 			(value) => !isEmptyValue(value)
 		).length;

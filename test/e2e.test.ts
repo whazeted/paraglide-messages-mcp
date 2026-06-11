@@ -7,7 +7,7 @@ import { createFixtureProject, removeFixture } from "./helpers.js";
 
 /**
  * End-to-end: spawns the built CLI (dist/cli.js) exactly like an MCP client
- * launched via `npx paraglide-mcp` would, talks MCP over stdio, and verifies
+ * launched via `npx paraglide-messages-mcp` would, talks MCP over stdio, and verifies
  * the translations land in messages/de.json on disk.
  *
  * Requires `pnpm build` first (use `pnpm test:e2e` / `pnpm test:all`).
@@ -52,7 +52,7 @@ async function callTool<T>(name: string, args: Record<string, unknown>): Promise
 	return result.structuredContent as T;
 }
 
-describe("paraglide-mcp end to end", () => {
+describe("paraglide-messages-mcp end to end", () => {
 	it("exposes the ten tools", async () => {
 		const { tools } = await client.listTools();
 		expect(tools.map((t) => t.name).sort()).toEqual([
@@ -167,12 +167,13 @@ describe("paraglide-mcp end to end", () => {
 		expect(result.isError).toBe(true);
 	});
 
-	it("exposes the three workflow prompts", async () => {
+	it("exposes the four workflow prompts", async () => {
 		const { prompts } = await client.listPrompts();
 		expect(prompts.map((p) => p.name).sort()).toEqual([
 			"review_locale",
 			"translate_locale",
 			"translate_prefix",
+			"translate_project",
 		]);
 		const translatePrefix = prompts.find((p) => p.name === "translate_prefix");
 		expect(

@@ -37,7 +37,7 @@ function median(values: number[]): number {
 }
 
 /** Median of 3 runs, to smooth out fs/jit jitter on cheap ops. */
-async function timeOp(fn: () => Promise<unknown>): Promise<number> {
+async function timeOp(fn: () => unknown): Promise<number> {
 	const samples: number[] = [];
 	for (let i = 0; i < 3; i++) {
 		const t0 = performance.now();

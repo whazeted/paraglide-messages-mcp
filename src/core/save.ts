@@ -27,6 +27,10 @@ export type SaveSummary = {
 /**
  * Validates a save batch against the current snapshot. Pure: returns the
  * per-item results plus the accepted `key -> value` map to persist.
+ *
+ * The snapshot may be scoped to base + target locale (see ReadOptions), so
+ * the unknown-key check covers keys present in either of those — a key that
+ * exists only in some third locale needs `allowNewKeys`.
  */
 export function validateBatch(
 	context: ProjectSnapshot,

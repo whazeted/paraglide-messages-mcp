@@ -18,16 +18,16 @@ export interface FixtureProject {
  *   <tmp>/project.inlang/settings.json
  *   <tmp>/messages/<locale>.json        (one per locale, $schema added)
  *
- * `modules` is left empty so tests never touch the network — the server's
- * bundled message-format plugin fallback kicks in (the same path an offline
- * user without a plugin cache hits).
+ * `modules` is left empty — the server resolves the message file locations
+ * from the `plugin.inlang.messageFormat` settings alone and never touches
+ * the network.
  */
 export function scaffoldProject(args: {
 	baseLocale: string;
 	locales: string[];
 	messages: Record<string, Record<string, unknown>>;
 }): FixtureProject {
-	const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "paraglide-mcp-test-"));
+	const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "paraglide-messages-mcp-test-"));
 	const projectPath = path.join(rootDir, "project.inlang");
 	const messagesDir = path.join(rootDir, "messages");
 	fs.mkdirSync(projectPath);
