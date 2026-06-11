@@ -274,6 +274,84 @@ export function registerTools(
 	);
 
 	server.registerTool(
+		"get_retranslation_batch",
+		{
+			title: "Get retranslation batch",
+			description:
+				"Get a batch of messages to RETRANSLATE for a target locale — unlike " +
+				"get_translation_batch this includes keys that already have a translation, so a " +
+				"full pass refreshes stale entries (and fills gaps) for everything in scope, " +
+				"optionally limited to a key prefix. Saving does not shrink the scope, so the " +
+				"loop pages by cursor instead of remaining/done. Workflow: call this, translate " +
+				"the items (each shows its current value as `existingTarget`; items that are " +
+				"already correct may be skipped), save with save_translations (which overwrites " +
+				"existing values), then call again with `after` set to the previous `nextCursor` " +
+				"until `hasMore` is false. Reads only the source and target locale files, so " +
+				"per-locale agents can run in parallel without touching each other's locales.",
+			inputSchema: {
+				targetLocale: z.string().describe("locale to retranslate"),
+				sourceLocale: z
+					.string()
+					.optional()
+					.describe("locale to translate from (default: project base locale)"),
+				prefix: z
+					.string()
+					.optional()
+					.describe("only consider keys starting with this prefix"),
+				batchSize: z
+					.number()
+					.int()
+					.min(1)
+					.optional()
+					.describe(
+						"messages per batch; omit for a sensible default — raise for " +
+							"short strings, lower for long, nuanced prose"
+					),
+				after: z
+					.string()
+					.optional()
+					.describe(
+						"pagination cursor: return keys after this key (use the previous call's `nextCursor`)"
+					),
+			},
+			outputSchema: {
+				targetLocale: z.string(),
+				sourceLocale: z.string(),
+				items: z.array(
+					z.object({
+						key: z.string(),
+						source: messageValueOutputSchema.describe(
+							"value in the source locale"
+						),
+						existingTarget: messageValueOutputSchema
+							.optional()
+							.describe(
+								"current value in the target locale — the value a save would replace"
+							),
+						placeholders: z
+							.array(z.string())
+							.describe("placeholders that must be preserved"),
+					})
+				),
+				total: z
+					.number()
+					.int()
+					.describe(
+						"keys in scope for this locale/prefix (stable across pages)"
+					),
+				hasMore: z
+					.boolean()
+					.describe("true when more pages follow — continue with `after: nextCursor`"),
+				nextCursor: z
+					.string()
+					.optional()
+					.describe("pass as `after` in the next call; absent on the last page"),
+			},
+		},
+		async (args) => jsonResult(await service.getRetranslationBatch(args))
+	);
+
+	server.registerTool(
 		"save_translations",
 		{
 			title: "Save translations",

@@ -8,6 +8,7 @@ import {
 } from "./locales.js";
 import {
 	computeProjectInfo,
+	nextRetranslationBatch,
 	nextTranslationBatch,
 	queryKeys,
 	queryMessages,
@@ -112,6 +113,32 @@ export class TranslationService {
 			],
 		});
 		return nextTranslationBatch(context, args);
+	}
+
+	getRetranslationBatch(args: {
+		targetLocale: string;
+		sourceLocale?: string;
+		prefix?: string;
+		batchSize?: number;
+		after?: string;
+	}): {
+		targetLocale: string;
+		sourceLocale: string;
+		items: TranslationItem[];
+		total: number;
+		hasMore: boolean;
+		nextCursor?: string;
+	} {
+		// per-locale operation, like getTranslationBatch — scope includes keys
+		// that already have a translation, paged by cursor (saving does not
+		// shrink the scope, so remaining/done cannot signal progress here)
+		const context = readSnapshot(this.projectPath, {
+			onlyLocales: [
+				args.targetLocale,
+				...(args.sourceLocale ? [args.sourceLocale] : []),
+			],
+		});
+		return nextRetranslationBatch(context, args);
 	}
 
 	saveTranslations(args: {

@@ -2,15 +2,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { flatten } from "flat";
 import { describe, it } from "vitest";
-import { TranslationService } from "../src/core/service.js";
-import { removeFixture } from "./helpers.js";
+import { TranslationService } from "../../src/core/service.js";
+import { removeFixture } from "../shared/helpers.js";
 import {
 	LARGE_FIXTURE_TARGET_LOCALES,
 	createLargeFixtureProject,
 	emptyNonBaseLocales,
 	pseudoTranslate,
-} from "./large-fixture.js";
-import type { MessageValue } from "../src/core/types.js";
+} from "../shared/large-fixture.js";
+import type { MessageValue } from "../../src/core/types.js";
 
 /**
  * Subagent-orchestration benchmark, not a regression test — excluded from

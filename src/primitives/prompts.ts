@@ -112,6 +112,29 @@ export function registerPrompts(
 	);
 
 	server.registerPrompt(
+		"retranslate",
+		{
+			title: "Retranslate messages (one subagent per locale)",
+			description:
+				"Retranslate messages — including ones that already have a translation — to refresh " +
+				"stale entries, e.g. after source copy or terminology changed. Scope with a key prefix; " +
+				"covers every target locale by default (one subagent per locale, in parallel) so no " +
+				"locale is left with a stale entry.",
+			argsSchema: {
+				prefix: optionalPrefixArg(
+					"key prefix to retranslate, e.g. 'checkout_' (default: every message — expensive on large projects)"
+				),
+				locales: optionalLocaleArg(
+					"comma-separated target locales (default: every target locale, so no stale entries remain)"
+				),
+			},
+		},
+		({ prefix, locales }) => ({
+			messages: userMessage(retranslateWorkflow({ locales, prefix })),
+		})
+	);
+
+	server.registerPrompt(
 		"review_locale",
 		{
 			title: "Review a locale",
@@ -199,6 +222,36 @@ Workflow:
 3. Spawn one subagent per target locale, all in parallel. Give each subagent: the style brief verbatim, its single target locale, and these instructions — loop until \`done\` is true: call get_translation_batch with { ${subagentBatchArgs} } (omit batchSize for the default; lower it for long, nuanced prose, raise it for short UI strings), translate every item preserving its \`placeholders\`, save with save_translations, fix per-item errors from \`results\` and re-save only those before continuing. Translate only your own locale; never touch others.
 4. When all subagents are done, call project_info again and confirm \`missing\` is 0 for every target locale${args.prefix ? " (within the prefix, via list_message_keys)" : ""}. Re-dispatch a subagent for any locale that still has missing messages.
 5. Report a summary: the style brief you used, per-locale message counts, anything subagents flagged as ambiguous, and suggest running the Paraglide compile step (usually part of dev/build).
+
+${TRANSLATION_RULES}`;
+}
+
+function retranslateWorkflow(args: {
+	locales?: string;
+	prefix?: string;
+}): string {
+	const targets = args.locales
+		? `the target locales ${args.locales}`
+		: "every target locale";
+	const scope = args.prefix
+		? `the messages whose keys start with "${args.prefix}"`
+		: "all messages";
+	const subagentBatchArgs = [
+		'targetLocale: "<locale>"',
+		args.prefix ? `prefix: "${args.prefix}"` : null,
+		'after: "<nextCursor from the previous call, omit on the first>"',
+	]
+		.filter(Boolean)
+		.join(", ");
+
+	return `Retranslate ${scope} in ${targets} using the paraglide-messages-mcp tools, with one subagent per locale running in parallel. Unlike a normal translation run this REPLACES existing translations — the goal is a fresh, consistent pass over the scope (e.g. after the source copy or terminology changed), leaving no stale entries in any locale. You are the orchestrator: you decide the style once, delegate the retranslation, and verify the result. Locales live in separate files and the translate tools only read/write the source and target locale, so per-locale subagents cannot interfere with each other.
+
+Workflow:
+1. Call project_info for the base locale and target locales. Retranslate every target locale unless the user narrowed the set — a partial run leaves the other locales stale, which defeats the point.
+2. Settle the style brief BEFORE delegating, exactly as for a full translation: sample representative messages (get_messages with a few prefixes), then write a short brief covering tone and voice, per-language formality/address choices, a glossary of recurring terms, and the non-negotiables (preserve {placeholder} names and markup exactly; adapt variant match cases to the language's plural rules). If the retranslation was prompted by a specific change (new terminology, reworded source copy), state it in the brief so every subagent applies it. Ask the user when unclear; otherwise decide yourself and state the brief in your summary.
+3. Spawn one subagent per target locale, all in parallel. Give each subagent: the style brief verbatim, its single target locale, and these instructions — loop until \`hasMore\` is false: call get_retranslation_batch with { ${subagentBatchArgs} }, produce a fresh translation for every item per the brief (each item's \`existingTarget\` shows the current value; when it already fits the brief you may keep it by skipping the item — skipped items don't stall the loop, the cursor moves regardless), save the rest with save_translations (it overwrites existing values), fix per-item errors from \`results\` and re-save only those before continuing with \`after: nextCursor\`. Translate only your own locale; never touch others.
+4. When all subagents are done, confirm coverage: each subagent's first batch reports \`total\` (the keys in its scope) — check every subagent walked its full scope (last call had \`hasMore: false\`). Re-dispatch a subagent for any locale that stopped early.
+5. Report a summary: the style brief you used, per-locale counts of retranslated vs. kept-as-is messages, anything subagents flagged as ambiguous, and suggest running the Paraglide compile step (usually part of dev/build).
 
 ${TRANSLATION_RULES}`;
 }

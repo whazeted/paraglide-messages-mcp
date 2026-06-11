@@ -134,6 +134,13 @@ re-submits only the failures. Scope work to a catalog subsection with
 `prefix` (e.g. `"checkout_"`). The `translate_project` prompt encodes the
 full fan-out workflow including the style brief.
 
+To *redo* existing translations (stale copy, changed terminology), the same
+loop runs on `get_retranslation_batch`, which also returns keys that already
+have a translation. Saving doesn't shrink that scope, so the loop pages by
+cursor (`after: nextCursor` until `hasMore` is false) instead of checking
+`done`; the `retranslate` prompt fans it out across every target locale by
+default so no locale is left stale (see DECISIONS.md #14).
+
 ## Benchmarks
 
 Two suites, both building real fixture projects in the OS temp directory:

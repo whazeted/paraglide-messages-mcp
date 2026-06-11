@@ -139,6 +139,52 @@ export function queryMessages(
 	return { messages, truncated };
 }
 
+/** Validates and resolves the source/target locale pair of a batch call. */
+function resolveSourceTarget(
+	context: ProjectSnapshot,
+	args: { targetLocale: string; sourceLocale?: string }
+): { targetLocale: string; sourceLocale: string } {
+	const { baseLocale, locales } = context;
+
+	const targetLocale = args.targetLocale;
+	if (!locales.includes(targetLocale)) {
+		throw unknownLocaleError(targetLocale, locales);
+	}
+	const sourceLocale = args.sourceLocale ?? baseLocale;
+	if (!locales.includes(sourceLocale)) {
+		throw unknownLocaleError(sourceLocale, locales);
+	}
+	if (sourceLocale === targetLocale) {
+		throw new Error("sourceLocale and targetLocale must differ");
+	}
+	return { targetLocale, sourceLocale };
+}
+
+/** Sorted keys of the snapshot, optionally narrowed to a prefix. */
+function sortedKeys(context: ProjectSnapshot, prefix?: string): string[] {
+	let keys = [...collectKeys(context.snapshot)].sort();
+	if (prefix) {
+		keys = keys.filter((key) => key.startsWith(prefix));
+	}
+	return keys;
+}
+
+function toTranslationItem(
+	context: ProjectSnapshot,
+	sourceLocale: string,
+	targetLocale: string,
+	key: string
+): TranslationItem {
+	const source = context.snapshot[sourceLocale]![key]!;
+	const existingTarget = context.snapshot[targetLocale]?.[key];
+	return {
+		key,
+		source,
+		...(existingTarget !== undefined && { existingTarget }),
+		placeholders: placeholdersOf(source),
+	};
+}
+
 export function nextTranslationBatch(
 	context: ProjectSnapshot,
 	args: {
@@ -154,42 +200,19 @@ export function nextTranslationBatch(
 	remaining: number;
 	done: boolean;
 } {
-	const { baseLocale, locales, snapshot } = context;
+	const { snapshot } = context;
+	const { targetLocale, sourceLocale } = resolveSourceTarget(context, args);
 
-	const targetLocale = args.targetLocale;
-	if (!locales.includes(targetLocale)) {
-		throw unknownLocaleError(targetLocale, locales);
-	}
-	const sourceLocale = args.sourceLocale ?? baseLocale;
-	if (!locales.includes(sourceLocale)) {
-		throw unknownLocaleError(sourceLocale, locales);
-	}
-	if (sourceLocale === targetLocale) {
-		throw new Error("sourceLocale and targetLocale must differ");
-	}
-
-	let keys = [...collectKeys(snapshot)].sort();
-	if (args.prefix) {
-		keys = keys.filter((key) => key.startsWith(args.prefix!));
-	}
-
-	const pending = keys.filter((key) => {
+	const pending = sortedKeys(context, args.prefix).filter((key) => {
 		const source = snapshot[sourceLocale]?.[key];
 		if (isEmptyValue(source)) return false;
 		return isEmptyValue(snapshot[targetLocale]?.[key]);
 	});
 
 	const batchSize = Math.max(1, args.batchSize ?? DEFAULT_TRANSLATION_BATCH_SIZE);
-	const items: TranslationItem[] = pending.slice(0, batchSize).map((key) => {
-		const source = snapshot[sourceLocale]![key]!;
-		const existingTarget = snapshot[targetLocale]?.[key];
-		return {
-			key,
-			source,
-			...(existingTarget !== undefined && { existingTarget }),
-			placeholders: placeholdersOf(source),
-		};
-	});
+	const items = pending
+		.slice(0, batchSize)
+		.map((key) => toTranslationItem(context, sourceLocale, targetLocale, key));
 
 	return {
 		targetLocale,
@@ -197,6 +220,60 @@ export function nextTranslationBatch(
 		items,
 		remaining: pending.length,
 		done: pending.length === 0,
+	};
+}
+
+/**
+ * The retranslation counterpart of nextTranslationBatch: covers every key
+ * with a non-empty source — including keys that already have a translation —
+ * so a pass over the scope refreshes stale entries and fills gaps alike.
+ *
+ * Because saving does not shrink the scope (a retranslated key stays in it),
+ * progress cannot use the remaining/done contract; the loop instead pages
+ * with a key cursor: pass the previous call's `nextCursor` as `after` until
+ * `hasMore` is false. This also means an agent may skip items it decides to
+ * keep without stalling the loop.
+ */
+export function nextRetranslationBatch(
+	context: ProjectSnapshot,
+	args: {
+		targetLocale: string;
+		sourceLocale?: string;
+		prefix?: string;
+		batchSize?: number;
+		after?: string;
+	}
+): {
+	targetLocale: string;
+	sourceLocale: string;
+	items: TranslationItem[];
+	total: number;
+	hasMore: boolean;
+	nextCursor?: string;
+} {
+	const { snapshot } = context;
+	const { targetLocale, sourceLocale } = resolveSourceTarget(context, args);
+
+	const inScope = sortedKeys(context, args.prefix).filter(
+		(key) => !isEmptyValue(snapshot[sourceLocale]?.[key])
+	);
+
+	const remaining = args.after
+		? inScope.filter((key) => key > args.after!)
+		: inScope;
+	const batchSize = Math.max(1, args.batchSize ?? DEFAULT_TRANSLATION_BATCH_SIZE);
+	const page = remaining.slice(0, batchSize);
+	const hasMore = remaining.length > batchSize;
+
+	return {
+		targetLocale,
+		sourceLocale,
+		items: page.map((key) =>
+			toTranslationItem(context, sourceLocale, targetLocale, key)
+		),
+		total: inScope.length,
+		hasMore,
+		nextCursor: hasMore ? page[page.length - 1] : undefined,
 	};
 }
 

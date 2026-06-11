@@ -1,10 +1,10 @@
 import { describe, it } from "vitest";
-import { TranslationService } from "../src/core/service.js";
-import { removeFixture } from "./helpers.js";
+import { TranslationService } from "../../src/core/service.js";
+import { removeFixture } from "../shared/helpers.js";
 import {
 	createLargeFixtureProject,
 	pseudoTranslate,
-} from "./large-fixture.js";
+} from "../shared/large-fixture.js";
 
 /**
  * Performance benchmark, not a regression test — excluded from `pnpm test`

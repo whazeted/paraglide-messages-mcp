@@ -1,14 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { TranslationService } from "../src/core/service.js";
-import { discoverProjectPath } from "../src/core/project.js";
+import { TranslationService } from "../../src/core/service.js";
+import { discoverProjectPath } from "../../src/core/project.js";
 import {
 	createFixtureProject,
 	removeFixture,
 	scaffoldProject,
-} from "./helpers.js";
-import type { ComplexMessage } from "../src/core/types.js";
+} from "../shared/helpers.js";
+import type { ComplexMessage } from "../../src/core/types.js";
 
 let fixture: ReturnType<typeof createFixtureProject>;
 let service: TranslationService;
@@ -285,6 +285,158 @@ describe("getTranslationBatch", () => {
 
 	it("rejects equal source and target locales", async () => {
 		expect(() => service.getTranslationBatch({ targetLocale: "en" })).toThrow(/must differ/);
+	});
+});
+
+describe("getRetranslationBatch", () => {
+	it("includes already-translated keys with their current value", async () => {
+		const batch = await service.getRetranslationBatch({
+			targetLocale: "de",
+			batchSize: 10,
+		});
+		expect(batch.sourceLocale).toBe("en");
+		// every key with a non-empty source, translated or not
+		expect(batch.items.map((i) => i.key)).toEqual([
+			"checkout_button_cancel",
+			"checkout_button_pay",
+			"checkout_title",
+			"greeting",
+			"hello_world",
+			"inbox_count",
+		]);
+		expect(batch.total).toBe(6);
+		expect(batch.hasMore).toBe(false);
+		expect(batch.nextCursor).toBeUndefined();
+
+		const greeting = batch.items.find((i) => i.key === "greeting");
+		expect(greeting?.existingTarget).toBe("Hallo {name}!");
+		expect(greeting?.placeholders).toEqual(["name"]);
+		// untranslated keys carry no existingTarget
+		const title = batch.items.find((i) => i.key === "checkout_title");
+		expect(title?.existingTarget).toBeUndefined();
+	});
+
+	it("supports prefix scoping", async () => {
+		const batch = await service.getRetranslationBatch({
+			targetLocale: "de",
+			prefix: "checkout_",
+			batchSize: 10,
+		});
+		expect(batch.items.map((i) => i.key)).toEqual([
+			"checkout_button_cancel",
+			"checkout_button_pay",
+			"checkout_title",
+		]);
+		expect(batch.total).toBe(3);
+		expect(batch.hasMore).toBe(false);
+	});
+
+	it("pages with a cursor while total stays stable", async () => {
+		const first = await service.getRetranslationBatch({
+			targetLocale: "de",
+			batchSize: 4,
+		});
+		expect(first.items).toHaveLength(4);
+		expect(first.total).toBe(6);
+		expect(first.hasMore).toBe(true);
+		expect(first.nextCursor).toBe("greeting");
+
+		const second = await service.getRetranslationBatch({
+			targetLocale: "de",
+			batchSize: 4,
+			after: first.nextCursor,
+		});
+		expect(second.items.map((i) => i.key)).toEqual([
+			"hello_world",
+			"inbox_count",
+		]);
+		expect(second.total).toBe(6);
+		expect(second.hasMore).toBe(false);
+		expect(second.nextCursor).toBeUndefined();
+	});
+
+	it("keeps saved keys in scope (the cursor, not the data, drives progress)", async () => {
+		await service.saveTranslations({
+			targetLocale: "de",
+			translations: [{ key: "checkout_title", value: "Kasse" }],
+		});
+		const batch = await service.getRetranslationBatch({
+			targetLocale: "de",
+			prefix: "checkout_",
+			batchSize: 10,
+		});
+		expect(batch.total).toBe(3);
+		const title = batch.items.find((i) => i.key === "checkout_title");
+		expect(title?.existingTarget).toBe("Kasse");
+	});
+
+	it("excludes keys whose source is empty", async () => {
+		const empty = scaffoldProject({
+			baseLocale: "en",
+			locales: ["en", "de"],
+			messages: {
+				en: { filled: "Hello", blank: "" },
+				de: { blank: "Stale" },
+			},
+		});
+		try {
+			const local = new TranslationService(empty.projectPath);
+			const batch = await local.getRetranslationBatch({
+				targetLocale: "de",
+				batchSize: 10,
+			});
+			expect(batch.items.map((i) => i.key)).toEqual(["filled"]);
+			expect(batch.total).toBe(1);
+		} finally {
+			removeFixture(empty.rootDir);
+		}
+	});
+
+	it("supports the full cursor loop with overwriting saves", async () => {
+		let after: string | undefined;
+		let guard = 0;
+		for (;;) {
+			const batch = await service.getRetranslationBatch({
+				targetLocale: "de",
+				batchSize: 2,
+				...(after !== undefined && { after }),
+			});
+			if (++guard > 10) throw new Error("loop did not converge");
+
+			const save = await service.saveTranslations({
+				targetLocale: "de",
+				translations: batch.items.map((item) => ({
+					key: item.key,
+					value:
+						typeof item.source === "string"
+							? `DE:${item.source}`
+							: item.source,
+				})),
+			});
+			expect(save.failed).toBe(0);
+
+			if (!batch.hasMore) break;
+			after = batch.nextCursor;
+		}
+
+		const deFile = fixture.readMessages("de");
+		// previously translated values were overwritten
+		expect(deFile.greeting).toBe("DE:Hello {name}!");
+		expect(deFile.hello_world).toBe("DE:Hello world!");
+		// previously missing values were filled in the same pass
+		expect(deFile.checkout_title).toBe("DE:Checkout");
+
+		const info = await service.projectInfo();
+		expect(info.missing.de).toBe(0);
+	});
+
+	it("rejects unknown locales and equal source/target", async () => {
+		expect(() =>
+			service.getRetranslationBatch({ targetLocale: "xx" })
+		).toThrow(/unknown locale/);
+		expect(() =>
+			service.getRetranslationBatch({ targetLocale: "en" })
+		).toThrow(/must differ/);
 	});
 });
 

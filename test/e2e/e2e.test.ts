@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { createFixtureProject, removeFixture } from "./helpers.js";
+import { createFixtureProject, removeFixture } from "../shared/helpers.js";
 
 /**
  * End-to-end: spawns the built CLI (dist/cli.js) exactly like an MCP client
@@ -14,7 +14,7 @@ import { createFixtureProject, removeFixture } from "./helpers.js";
  */
 const cliPath = path.resolve(
 	path.dirname(fileURLToPath(import.meta.url)),
-	"../dist/cli.js"
+	"../../dist/cli.js"
 );
 
 let fixture: ReturnType<typeof createFixtureProject>;
@@ -53,12 +53,13 @@ async function callTool<T>(name: string, args: Record<string, unknown>): Promise
 }
 
 describe("paraglide-messages-mcp end to end", () => {
-	it("exposes the ten tools", async () => {
+	it("exposes the eleven tools", async () => {
 		const { tools } = await client.listTools();
 		expect(tools.map((t) => t.name).sort()).toEqual([
 			"add_locale",
 			"delete_messages",
 			"get_messages",
+			"get_retranslation_batch",
 			"get_translation_batch",
 			"list_message_keys",
 			"project_info",
@@ -147,6 +148,61 @@ describe("paraglide-messages-mcp end to end", () => {
 		expect(info.missing.de).toBe(0);
 	});
 
+	it("retranslates an already-translated prefix via cursor pages", async () => {
+		// the previous test filled "de" completely; redo the checkout_ keys
+		let after: string | undefined;
+		let pages = 0;
+		const seen: string[] = [];
+		for (;;) {
+			const batch = await callTool<{
+				items: Array<{ key: string; source: unknown; existingTarget?: unknown }>;
+				total: number;
+				hasMore: boolean;
+				nextCursor?: string;
+			}>("get_retranslation_batch", {
+				targetLocale: "de",
+				prefix: "checkout_",
+				batchSize: 2,
+				...(after !== undefined && { after }),
+			});
+			if (++pages > 10) throw new Error("loop did not converge");
+			expect(batch.total).toBe(3);
+			for (const item of batch.items) {
+				// everything in scope is already translated, so the current
+				// value is exposed for the agent to judge
+				expect(item.existingTarget).toBeDefined();
+				seen.push(item.key);
+			}
+
+			const save = await callTool<{ failed: number }>("save_translations", {
+				targetLocale: "de",
+				translations: batch.items.map((item) => ({
+					key: item.key,
+					value:
+						typeof item.source === "string"
+							? `DE2:${item.source}`
+							: item.source,
+				})),
+			});
+			expect(save.failed).toBe(0);
+
+			if (!batch.hasMore) break;
+			after = batch.nextCursor;
+		}
+
+		expect(pages).toBe(2);
+		expect(seen).toEqual([
+			"checkout_button_cancel",
+			"checkout_button_pay",
+			"checkout_title",
+		]);
+
+		const deFile = fixture.readMessages("de") as Record<string, unknown>;
+		expect(deFile.checkout_title).toBe("DE2:Checkout");
+		// keys outside the prefix were not touched
+		expect(deFile.greeting).toBe("Hallo {name}!");
+	});
+
 	it("surfaces validation errors through the tool result", async () => {
 		const result = await callTool<{
 			failed: number;
@@ -167,9 +223,10 @@ describe("paraglide-messages-mcp end to end", () => {
 		expect(result.isError).toBe(true);
 	});
 
-	it("exposes the four workflow prompts", async () => {
+	it("exposes the five workflow prompts", async () => {
 		const { prompts } = await client.listPrompts();
 		expect(prompts.map((p) => p.name).sort()).toEqual([
+			"retranslate",
 			"review_locale",
 			"translate_locale",
 			"translate_prefix",
@@ -315,7 +372,8 @@ describe("paraglide-messages-mcp end to end", () => {
 		expect(enFile.checkout_title).toBeUndefined();
 		expect(enFile.checkout_heading).toBe("Checkout");
 		const deFile = fixture.readMessages("de") as Record<string, unknown>;
-		expect(deFile.checkout_heading).toBe("DE:Checkout");
+		// "DE2:" — the value last written by the retranslation test above
+		expect(deFile.checkout_heading).toBe("DE2:Checkout");
 	});
 
 	it("rejects a rename onto an existing key as a tool error", async () => {

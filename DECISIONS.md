@@ -161,3 +161,20 @@ numbers drift from the constants and read as rules. They now state the
 direction and its effect instead: raising the batch size means fewer
 round-trips (short UI strings); lowering it gives each item more of the
 agent's attention (long, nuanced prose).
+
+## 14. Retranslation pages by cursor, not by remaining/done
+
+**2026-06-11 · active**
+
+`get_retranslation_batch` covers every key with a non-empty source —
+already-translated ones included — so one pass over a scope (typically a
+key `prefix`) refreshes stale entries and fills gaps alike, with
+`save_translations` overwriting as it always has. The translate loop's
+remaining/done contract cannot drive this: saving a retranslated key does
+not shrink the scope, so the loop would never terminate. Progress is
+therefore a key cursor (`after`/`nextCursor`, like `list_message_keys`),
+which also lets an agent *skip* items whose `existingTarget` already fits
+the brief without stalling. A separate tool was chosen over a flag on
+`get_translation_batch` so each tool keeps a single, unambiguous loop
+contract. The `retranslate` prompt defaults to every target locale —
+refreshing one locale and leaving its siblings stale defeats the point.

@@ -52,7 +52,8 @@ translate every locale at once with one subagent per locale.
 | --- | --- |
 | `project_info` | Locales, base locale, per-locale translated/missing counts. |
 | `get_translation_batch` | Next batch of untranslated messages for a locale (default 50), with source text and required placeholders. |
-| `save_translations` | Validate and persist translations for one locale; per-item results. |
+| `get_retranslation_batch` | Cursor-paged batch over *already-translated* messages too — refresh stale entries after source/terminology changes. |
+| `save_translations` | Validate and persist translations for one locale; per-item results — overwrites existing values. |
 | `list_message_keys` | Keys only, filterable by prefix and status, paginated. |
 | `get_messages` | Full message content by keys or prefix. |
 | `search_messages` | Find messages by text or key substring. |
@@ -66,6 +67,7 @@ translate every locale at once with one subagent per locale.
 | `translate_project` | Translate every locale: the main agent settles a style brief (tone, formality, glossary), then fans out one subagent per locale in parallel. |
 | `translate_locale` | Translate one locale via the batch loop. |
 | `translate_prefix` | Same, scoped to keys starting with a prefix. |
+| `retranslate` | Redo existing translations (stale copy, changed terminology) — by key prefix, every target locale by default, one subagent per locale. |
 | `review_locale` | Review existing translations against the base locale and fix problems. |
 
 Read-only state is also exposed as MCP resources

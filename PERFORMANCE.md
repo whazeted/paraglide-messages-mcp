@@ -22,7 +22,7 @@ bundled prompts/skill):
 Two generated fixture projects, both with 11 locales (`en` base + 10 targets)
 and realistic message shapes (single words, placeholder sentences,
 multi-sentence paragraphs, plural variant arrays — see
-[test/generate-messages.ts](test/generate-messages.ts)):
+[test/shared/generate-messages.ts](test/shared/generate-messages.ts)):
 
 - **small**: 250 messages — an early-stage app; the full translation run is
   measured end to end

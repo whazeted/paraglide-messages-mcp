@@ -1,13 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { parseDirectProject } from "../src/core/direct.js";
-import { TranslationService } from "../src/core/service.js";
+import { parseDirectProject } from "../../src/core/direct.js";
+import { TranslationService } from "../../src/core/service.js";
 import {
 	createFixtureProject,
 	removeFixture,
 	type FixtureProject,
-} from "./helpers.js";
+} from "../shared/helpers.js";
 
 /**
  * Tests for the direct message-format file access (src/core/direct.ts):

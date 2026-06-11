@@ -54,6 +54,33 @@ needs translation, fan out instead of going locale after locale:
    subagent for any locale with leftovers. Summarize the brief, per-locale
    counts, and anything subagents flagged as ambiguous.
 
+## Retranslating existing messages
+
+When the user wants to *redo* translations that already exist — the source
+copy changed, terminology was updated, or entries have gone stale — the
+normal loop won't surface them (`get_translation_batch` only returns
+*missing* messages). Use **`get_retranslation_batch`** instead: it covers
+every key with a non-empty source, including already-translated ones, and
+`save_translations` overwrites the old values.
+
+Two things differ from the normal loop:
+
+- **Scope it deliberately.** Prefer a key `prefix` (e.g. the feature whose
+  copy changed); an unscoped retranslate redoes the entire project. Default
+  to **all target locales** — retranslating only one locale leaves the
+  others stale, which defeats the point. Fan out one subagent per locale
+  exactly as above, sharing one style brief.
+- **Loop by cursor, not by `done`.** Saving doesn't shrink the scope (a
+  retranslated key stays in it), so page instead: call
+  `get_retranslation_batch`, translate, save, then call again with
+  `after: nextCursor` until `hasMore` is false. Each item's
+  `existingTarget` shows the current value — when it already fits the
+  brief you may keep it by simply skipping the item; the cursor moves on
+  regardless.
+
+State why the retranslation is happening (new terminology, reworded
+source, …) in the style brief so every locale applies the same change.
+
 The server also exposes read-only resources mirroring the read tools —
 `paraglide://project/info`, `paraglide://locales/{locale}/missing`, and
 `paraglide://messages/{locale}/{key}` — handy when the user has pinned one as

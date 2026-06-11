@@ -1,13 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { TranslationService } from "../src/core/service.js";
-import type { MessageValue } from "../src/core/types.js";
-import { removeFixture } from "./helpers.js";
+import { TranslationService } from "../../src/core/service.js";
+import type { MessageValue } from "../../src/core/types.js";
+import { removeFixture } from "../shared/helpers.js";
 import {
 	createLargeFixtureProject,
 	emptyNonBaseLocales,
 	LARGE_FIXTURE_TARGET_LOCALES,
 	pseudoTranslate,
-} from "./large-fixture.js";
+} from "../shared/large-fixture.js";
 
 /**
  * Integration test against a realistic Paraglide project on disk: a few
