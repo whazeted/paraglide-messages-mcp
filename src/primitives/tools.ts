@@ -1,10 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
-	DEFAULT_BATCH_SIZE,
-	MAX_KEYS_LIMIT,
-	MAX_MESSAGES_LIMIT,
-	MAX_SEARCH_LIMIT,
+	DEFAULT_LIST_KEYS_PAGE_SIZE,
+	DEFAULT_GET_MESSAGES_LIMIT,
+	DEFAULT_SEARCH_MESSAGES_LIMIT,
 } from "../core/constants.js";
 import type { TranslationService } from "../core/service.js";
 import type { TranslationInput } from "../core/types.js";
@@ -89,7 +88,12 @@ export function registerTools(
 					.enum(["all", "missing", "translated"])
 					.optional()
 					.describe("filter by translation status in `locale` (default: all)"),
-				limit: z.number().int().min(1).max(MAX_KEYS_LIMIT).optional(),
+				limit: z
+					.number()
+					.int()
+					.min(1)
+					.optional()
+					.describe(`keys per page (default ${DEFAULT_LIST_KEYS_PAGE_SIZE})`),
 				after: z
 					.string()
 					.optional()
@@ -133,7 +137,12 @@ export function registerTools(
 					.array(z.string())
 					.optional()
 					.describe("restrict to these locales (default: all project locales)"),
-				limit: z.number().int().min(1).max(MAX_MESSAGES_LIMIT).optional(),
+				limit: z
+					.number()
+					.int()
+					.min(1)
+					.optional()
+					.describe(`max messages to return (default ${DEFAULT_GET_MESSAGES_LIMIT})`),
 			},
 			outputSchema: {
 				messages: z.array(
@@ -172,7 +181,12 @@ export function registerTools(
 					.describe(
 						"restrict the content search to these locales (default: all project locales)"
 					),
-				limit: z.number().int().min(1).max(MAX_SEARCH_LIMIT).optional(),
+				limit: z
+					.number()
+					.int()
+					.min(1)
+					.optional()
+					.describe(`max results to return (default ${DEFAULT_SEARCH_MESSAGES_LIMIT})`),
 			},
 			outputSchema: {
 				results: z.array(
@@ -209,8 +223,8 @@ export function registerTools(
 				"limited to a key prefix). Returns the source text, required placeholders, and the " +
 				"number of remaining untranslated messages. Workflow: call this, translate the items, " +
 				"save them with save_translations, then call this again until `done` is true. " +
-				`Default batch size is ${DEFAULT_BATCH_SIZE}; raise it for short UI strings, ` +
-				"drop to 5-10 for long, nuanced prose. Reads only the source and target locale " +
+				"Raise batchSize for short UI strings (fewer round-trips); lower it for long, " +
+				"nuanced prose so each item gets full attention. Reads only the source and target locale " +
 				"files, so per-locale agents can run in parallel without touching each other's locales.",
 			inputSchema: {
 				targetLocale: z.string().describe("locale to translate into"),
@@ -227,7 +241,10 @@ export function registerTools(
 					.int()
 					.min(1)
 					.optional()
-					.describe(`messages per batch (default ${DEFAULT_BATCH_SIZE})`),
+					.describe(
+						"messages per batch; omit for a sensible default — raise for " +
+							"short strings, lower for long, nuanced prose"
+					),
 			},
 			outputSchema: {
 				targetLocale: z.string(),

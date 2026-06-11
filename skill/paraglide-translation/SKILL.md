@@ -18,9 +18,10 @@ rejected on its own instead of sinking the call.
    with any style preferences (tone, formality, terminology).
 2. Loop until `done` is true:
    a. **`get_translation_batch`** with `targetLocale` (and `prefix` if
-      scoping). Use the default `batchSize` of 50 (the default comes from
-      `src/core/constants.ts`); raise it for short UI
-      strings, drop to 5–10 for long, nuanced prose.
+      scoping). Omit `batchSize` to use the default (defined in
+      `src/core/constants.ts`); raise it for short UI strings — fewer
+      round-trips — or lower it for long, nuanced prose so each item gets
+      full attention.
    b. Translate each item's `source` into the target locale.
    c. **`save_translations`** with the same keys. The server validates each
       item; check `results` for per-item errors, fix only the failed items,

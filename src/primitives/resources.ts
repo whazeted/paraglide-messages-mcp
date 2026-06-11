@@ -2,7 +2,7 @@ import {
 	type McpServer,
 	ResourceTemplate,
 } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { COMPLETION_LIMIT, MAX_KEYS_LIMIT } from "../core/constants.js";
+import { COMPLETION_SUGGESTION_LIMIT, DEFAULT_LIST_KEYS_PAGE_SIZE } from "../core/constants.js";
 import type { TranslationService } from "../core/service.js";
 
 /**
@@ -31,7 +31,7 @@ export function registerResources(
 		try {
 			const { keys } = await service.listKeys({
 				prefix: value || undefined,
-				limit: COMPLETION_LIMIT,
+				limit: COMPLETION_SUGGESTION_LIMIT,
 			});
 			return keys;
 		} catch {
@@ -87,7 +87,7 @@ export function registerResources(
 				const page = await service.listKeys({
 					locale,
 					status: "missing",
-					limit: MAX_KEYS_LIMIT,
+					limit: DEFAULT_LIST_KEYS_PAGE_SIZE,
 					after,
 				});
 				keys.push(...page.keys);

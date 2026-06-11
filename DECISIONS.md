@@ -147,3 +147,17 @@ validation means a bad item never sinks a call regardless of size, and the
 caps only forced agents to split large runs into artificial chunks. Agents
 still steer the size themselves — raise it for short UI strings, drop to
 5–10 for long, nuanced prose.
+
+## 13. Defaults only everywhere; guidance by direction, not numbers
+
+**2026-06-11 · active · extends 12**
+
+The remaining caps (`MAX_KEYS_LIMIT`, `MAX_MESSAGES_LIMIT`,
+`MAX_SEARCH_LIMIT`) were dropped for the same reason as the batch caps:
+they only forced artificial chunking. `src/core/constants.ts` now holds
+defaults only; any positive value is accepted. Prompt, skill, and tool
+texts stopped quoting concrete numbers (e.g. "drop to 5–10") — hard-coded
+numbers drift from the constants and read as rules. They now state the
+direction and its effect instead: raising the batch size means fewer
+round-trips (short UI strings); lowering it gives each item more of the
+agent's attention (long, nuanced prose).

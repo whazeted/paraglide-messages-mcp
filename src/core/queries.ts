@@ -1,12 +1,9 @@
 import { isEmptyValue, patternsOf, placeholdersOf } from "./format.js";
 import {
-	DEFAULT_BATCH_SIZE,
-	DEFAULT_KEYS_LIMIT,
-	DEFAULT_MESSAGES_LIMIT,
-	DEFAULT_SEARCH_LIMIT,
-	MAX_KEYS_LIMIT,
-	MAX_MESSAGES_LIMIT,
-	MAX_SEARCH_LIMIT,
+	DEFAULT_TRANSLATION_BATCH_SIZE,
+	DEFAULT_LIST_KEYS_PAGE_SIZE,
+	DEFAULT_GET_MESSAGES_LIMIT,
+	DEFAULT_SEARCH_MESSAGES_LIMIT,
 } from "./constants.js";
 import { MESSAGE_FORMAT_PLUGIN_KEY } from "./direct.js";
 import { collectKeys, type ProjectSnapshot } from "./storage.js";
@@ -84,7 +81,7 @@ export function queryKeys(
 	if (args.after) {
 		keys = keys.filter((key) => key > args.after!);
 	}
-	const limit = clamp(args.limit ?? DEFAULT_KEYS_LIMIT, 1, MAX_KEYS_LIMIT);
+	const limit = Math.max(1, args.limit ?? DEFAULT_LIST_KEYS_PAGE_SIZE);
 	const page = keys.slice(0, limit);
 	const hasMore = keys.length > limit;
 
@@ -123,11 +120,7 @@ export function queryMessages(
 			.sort();
 	}
 
-	const limit = clamp(
-		args.limit ?? DEFAULT_MESSAGES_LIMIT,
-		1,
-		MAX_MESSAGES_LIMIT
-	);
+	const limit = Math.max(1, args.limit ?? DEFAULT_GET_MESSAGES_LIMIT);
 	const truncated = keys.length > limit;
 	keys = keys.slice(0, limit);
 
@@ -186,7 +179,7 @@ export function nextTranslationBatch(
 		return isEmptyValue(snapshot[targetLocale]?.[key]);
 	});
 
-	const batchSize = Math.max(1, args.batchSize ?? DEFAULT_BATCH_SIZE);
+	const batchSize = Math.max(1, args.batchSize ?? DEFAULT_TRANSLATION_BATCH_SIZE);
 	const items: TranslationItem[] = pending.slice(0, batchSize).map((key) => {
 		const source = snapshot[sourceLocale]![key]!;
 		const existingTarget = snapshot[targetLocale]?.[key];
@@ -255,7 +248,7 @@ export function searchMessages(
 	}
 
 	const total = results.length;
-	const limit = clamp(args.limit ?? DEFAULT_SEARCH_LIMIT, 1, MAX_SEARCH_LIMIT);
+	const limit = Math.max(1, args.limit ?? DEFAULT_SEARCH_MESSAGES_LIMIT);
 	return {
 		results: results.slice(0, limit),
 		total,
@@ -286,6 +279,3 @@ export function unknownLocaleError(locale: string, locales: string[]): Error {
 	);
 }
 
-function clamp(value: number, min: number, max: number): number {
-	return Math.max(min, Math.min(max, value));
-}
