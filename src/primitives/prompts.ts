@@ -4,8 +4,6 @@ import { z } from "zod";
 import {
 	COMPLETION_LIMIT,
 	DEFAULT_BATCH_SIZE,
-	MAX_BATCH_SIZE,
-	MAX_SAVE_BATCH,
 } from "../core/constants.js";
 import type { TranslationService } from "../core/service.js";
 
@@ -166,7 +164,7 @@ function translateWorkflow(args: {
 Workflow:
 1. Call project_info to confirm the locale and see how many messages are missing.
 2. Loop until \`done\` is true:
-   a. Call get_translation_batch with { ${batchArgs} }. Use the default batchSize of ${DEFAULT_BATCH_SIZE}; raise it (up to ${MAX_BATCH_SIZE}) for short UI strings, or drop to 5-10 for long, nuanced prose.
+   a. Call get_translation_batch with { ${batchArgs} }. Use the default batchSize of ${DEFAULT_BATCH_SIZE}; raise it for short UI strings, or drop to 5-10 for long, nuanced prose.
    b. Translate each item's \`source\` into the target locale, preserving every placeholder listed in \`placeholders\`.
    c. Call save_translations with the same keys. Check \`results\` for per-item errors, fix only the failed items, and re-save them before moving on.
 3. When \`remaining\` is 0, report a short summary (how many messages, which scope) and suggest running the Paraglide compile step (usually part of dev/build).
@@ -229,7 +227,7 @@ Workflow:
    - markup tags like {#bold}/{/bold} are preserved and correctly nested,
    - variant messages cover the right plural cases for the language,
    - the text is actually translated (not copied source text), is roughly the source's length, and is stylistically consistent (one tone, formality level, and terminology across the locale).
-4. Fix problems with save_translations in small batches (max ${MAX_SAVE_BATCH} per call) and check \`results\` for per-item errors.
+4. Fix problems with save_translations in small batches and check \`results\` for per-item errors.
 5. Report a summary: how many messages you reviewed, how many you fixed and why, and anything ambiguous you left unchanged.
 
 ${TRANSLATION_RULES}`;

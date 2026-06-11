@@ -51,7 +51,7 @@ translate every locale at once with one subagent per locale.
 | Tool | Purpose |
 | --- | --- |
 | `project_info` | Locales, base locale, per-locale translated/missing counts. |
-| `get_translation_batch` | Next batch of untranslated messages for a locale (default 50, max 200), with source text and required placeholders. |
+| `get_translation_batch` | Next batch of untranslated messages for a locale (default 50), with source text and required placeholders. |
 | `save_translations` | Validate and persist translations for one locale; per-item results. |
 | `list_message_keys` | Keys only, filterable by prefix and status, paginated. |
 | `get_messages` | Full message content by keys or prefix. |

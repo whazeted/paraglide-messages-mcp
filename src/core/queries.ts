@@ -4,7 +4,6 @@ import {
 	DEFAULT_KEYS_LIMIT,
 	DEFAULT_MESSAGES_LIMIT,
 	DEFAULT_SEARCH_LIMIT,
-	MAX_BATCH_SIZE,
 	MAX_KEYS_LIMIT,
 	MAX_MESSAGES_LIMIT,
 	MAX_SEARCH_LIMIT,
@@ -187,11 +186,7 @@ export function nextTranslationBatch(
 		return isEmptyValue(snapshot[targetLocale]?.[key]);
 	});
 
-	const batchSize = clamp(
-		args.batchSize ?? DEFAULT_BATCH_SIZE,
-		1,
-		MAX_BATCH_SIZE
-	);
+	const batchSize = Math.max(1, args.batchSize ?? DEFAULT_BATCH_SIZE);
 	const items: TranslationItem[] = pending.slice(0, batchSize).map((key) => {
 		const source = snapshot[sourceLocale]![key]!;
 		const existingTarget = snapshot[targetLocale]?.[key];
