@@ -1,86 +1,61 @@
 # Compatibility
 
-Which project setups and translation file formats paraglide-mcp works with,
-and what to expect from each.
+Which project setups paraglide-mcp works with, and what to expect.
 
 ## TL;DR
 
 | Your setup | Works? | Notes |
 | --- | --- | --- |
-| Paraglide JS default (`messages/{locale}.json`, message format plugin) | ✅ | The primary target — fastest path, works offline. |
-| inlang message format with a custom `pathPattern` (single file per locale) | ✅ | Same fast path, any location, e.g. `./src/i18n/{locale}.json`. |
-| inlang message format with multiple files per locale (`pathPattern` array) | ✅ | Handled through the inlang SDK; slower on large projects. |
-| i18next plugin | ✅ | Through the inlang SDK; requires network on first load. |
-| next-intl plugin | ✅ | Through the inlang SDK; requires network on first load. |
-| ICU MessageFormat v1 plugin | ✅ | Through the inlang SDK; requires network on first load. |
-| gettext / `.po` files | ❌ | No inlang plugin exists for the current SDK. |
-| XLIFF | ❌ | No inlang plugin exists for the current SDK. |
+| Paraglide JS default (`messages/{locale}.json`, message format plugin) | ✅ | The target setup — direct file access, works offline. |
+| inlang message format with a custom `pathPattern` (single file per locale) | ✅ | Same path, any location, e.g. `./src/i18n/{locale}.json`. |
+| inlang message format with multiple files per locale (`pathPattern` array) | ❌ | Requires the inlang SDK, which this server no longer ships. |
+| i18next / next-intl / ICU MessageFormat plugins | ❌ | Same — these go through the inlang SDK. |
+| gettext / `.po` files, XLIFF | ❌ | No inlang plugin exists for these formats either. |
 
-## How format support works
+## What the server requires
 
-paraglide-mcp does not parse translation formats itself — and neither does
-Paraglide JS. Both operate on an [inlang project](https://inlang.com)
-(`project.inlang/settings.json`), and the project's configured
-**import/export plugin** determines which file format your translations live
-in. If an inlang plugin can read and write your format, paraglide-mcp can
-translate it.
+paraglide-mcp reads and writes the inlang **message format** JSON files
+directly. The project's `project.inlang/settings.json` must declare:
 
-The currently available import/export plugins (see the
-[inlang plugin catalog](https://inlang.com/c/plugins)) are all JSON-based:
+- `baseLocale` (string) and `locales` (array of strings)
+- `plugin.inlang.messageFormat` with a **single string** `pathPattern`
+  containing `{locale}` (e.g. `"./messages/{locale}.json"`)
+- no other import/export plugin module in `modules` (lint-rule modules are
+  fine)
 
-- [inlang message format](https://inlang.com/m/reootnfj/plugin-inlang-messageFormat)
-  — the Paraglide JS default
-- i18next
-- next-intl
-- ICU MessageFormat v1
-- Xcode String Catalogs
+Any other configuration is rejected at the first tool call with a clear
+error. This is the standard Paraglide JS setup, so most projects qualify
+as-is.
 
-## The message format fast path
+## Why direct file access only
 
-Projects using the **inlang message format plugin** with a single file per
-locale — the standard Paraglide JS setup — get a fast path: the server reads
-and writes your `messages/{locale}.json` files directly instead of going
-through the inlang SDK's load/save cycle. What that means for you:
+Earlier versions fell back to the inlang SDK for other plugins (i18next,
+next-intl, ICU) and multi-file `pathPattern` arrays. That fallback was
+dropped deliberately:
 
+- **Parallel-safety.** The server is built for one agent per locale running
+  concurrently (see [PERFORMANCE.md](PERFORMANCE.md)). Direct access reads
+  only the locales a call needs and writes only the target locale's file —
+  atomic, conflict-free. The SDK path rewrote *every* locale file on each
+  save, so concurrent per-locale agents would clobber each other.
 - **Speed.** Tool calls take single-digit milliseconds regardless of project
-  size, instead of growing into seconds on large projects. A full
-  translation run over 2,000 messages takes under 2 seconds of server
-  overhead instead of ~21 minutes. Details and measurements in
-  [PERFORMANCE.md](PERFORMANCE.md).
+  size; the SDK's load/save cycle grew into seconds on large projects.
+- **Footprint.** Dropping `@inlang/sdk` removes the sqlite-wasm runtime and
+  the bulk of the dependency tree, which makes `npx paraglide-mcp` start
+  fast and work fully offline.
+
+What you keep either way:
+
 - **Minimal writes.** Saving translations rewrites only the target locale's
   file. Other locale files are untouched byte for byte, so file watchers
   (like `paraglide dev`) don't re-trigger for locales that didn't change.
-- **Identical output.** The written files match the plugin's own export
-  format exactly — `$schema` header, tab indentation, and the plugin's
+- **Identical output.** The written files match the message-format plugin's
+  own export exactly — `$schema` header, tab indentation, and the plugin's
   optional `sort` setting are all honored. Your diffs look the same as if
-  the inlang SDK had written them.
-- **Offline.** No plugin needs to be fetched from the CDN.
+  the inlang toolchain had written them.
 
-The fast path engages automatically when the project's
-`plugin.inlang.messageFormat` settings declare a single string
-`pathPattern`. Everything else — `pathPattern` arrays (one file per
-namespace), i18next, next-intl, ICU — transparently uses the inlang SDK with
-your project's own plugin, with identical behavior and validation, just
-slower on large projects.
-
-To force the SDK path (e.g. to rule out the fast path while debugging), set
-the environment variable `PARAGLIDE_MCP_FORCE_SDK=1` in your MCP server
-configuration.
-
-## PO and XLIFF
-
-Not supported, because no import/export plugin for these formats exists for
-the current inlang SDK:
-
-- **gettext / PO**: a community plugin
-  ([jannesblobel/inlang-plugin-po](https://github.com/jannesblobel/inlang-plugin-po))
-  exists but targets the legacy v1 plugin API and does not work with
-  `@inlang/sdk` 2.x.
-- **XLIFF**: mentioned in inlang's documentation as a goal of the plugin
-  system, but no plugin has shipped.
-
-If such a plugin ships in the future, paraglide-mcp's SDK path is the place
-it would plug in — file an issue if you hit this.
+If you need i18next/next-intl/ICU or multi-file namespaces, use the last
+release that still shipped the SDK fallback, or file an issue.
 
 ## Other requirements
 
@@ -88,7 +63,3 @@ it would plug in — file an issue if you hit this.
 - The base locale's messages are the translation source, so it should be
   reasonably complete — messages with an empty base value are skipped by
   `get_translation_batch`.
-- Plugins other than the message format plugin are fetched from inlang's CDN
-  on first load and cached by the SDK afterwards. For message-format
-  projects this never matters: a copy of the plugin is bundled with
-  paraglide-mcp.

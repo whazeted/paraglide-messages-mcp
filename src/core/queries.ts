@@ -9,6 +9,7 @@ import {
 	MAX_MESSAGES_LIMIT,
 	MAX_SEARCH_LIMIT,
 } from "./constants.js";
+import { MESSAGE_FORMAT_PLUGIN_KEY } from "./direct.js";
 import { collectKeys, type ProjectSnapshot } from "./storage.js";
 import type { MessageValue, ProjectInfo, TranslationItem } from "./types.js";
 
@@ -18,7 +19,7 @@ export function computeProjectInfo(
 	projectPath: string,
 	context: ProjectSnapshot
 ): ProjectInfo {
-	const { baseLocale, locales, pluginKey, snapshot } = context;
+	const { baseLocale, locales, snapshot } = context;
 	const allKeys = collectKeys(snapshot);
 
 	const translated: Record<string, number> = {};
@@ -36,7 +37,7 @@ export function computeProjectInfo(
 		projectPath,
 		baseLocale,
 		locales,
-		pluginKey,
+		pluginKey: MESSAGE_FORMAT_PLUGIN_KEY,
 		totalKeys: allKeys.size,
 		translated,
 		missing,

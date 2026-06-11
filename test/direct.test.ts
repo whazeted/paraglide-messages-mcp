@@ -11,8 +11,8 @@ import {
 
 /**
  * Tests for the direct message-format file access (src/core/direct.ts):
- * when it applies, that its output matches the SDK path, and that the SDK
- * fallback still works (the other tests all run through the fast path).
+ * which projects it accepts, that writes stay scoped to the files an
+ * operation touches, and that unsupported projects fail with a clear error.
  */
 
 const fixtures: FixtureProject[] = [];
@@ -34,7 +34,6 @@ function patchSettings(
 }
 
 afterEach(() => {
-	delete process.env.PARAGLIDE_MCP_FORCE_SDK;
 	while (fixtures.length > 0) {
 		removeFixture(fixtures.pop()!.rootDir);
 	}
@@ -50,23 +49,27 @@ describe("parseDirectProject", () => {
 		expect(direct!.fileFor("de")).toBe(path.join(f.messagesDir, "de.json"));
 	});
 
-	it("returns null for an array pathPattern", () => {
+	it("rejects an array pathPattern (multiple files per locale)", () => {
 		const f = fixture();
 		patchSettings(f, (s) => {
 			(s["plugin.inlang.messageFormat"] as Record<string, unknown>).pathPattern =
 				["./messages/{locale}.json"];
 		});
-		expect(parseDirectProject(f.projectPath)).toBeNull();
+		expect(() => parseDirectProject(f.projectPath)).toThrow(
+			/only supports inlang message-format projects/
+		);
 	});
 
-	it("returns null when a foreign import/export plugin module is configured", () => {
+	it("rejects a foreign import/export plugin module", () => {
 		const f = fixture();
 		patchSettings(f, (s) => {
 			s.modules = [
 				"https://cdn.jsdelivr.net/npm/@inlang/plugin-i18next@latest/dist/index.js",
 			];
 		});
-		expect(parseDirectProject(f.projectPath)).toBeNull();
+		expect(() => parseDirectProject(f.projectPath)).toThrow(
+			/only supports inlang message-format projects/
+		);
 	});
 
 	it("tolerates lint-rule modules", () => {
@@ -80,13 +83,6 @@ describe("parseDirectProject", () => {
 		expect(parseDirectProject(f.projectPath)).not.toBeNull();
 	});
 
-	it("ignores PARAGLIDE_MCP_FORCE_SDK — the flag is storage policy, not parsing", () => {
-		// the SDK-fallback describe below covers the flag routing reads/writes
-		// through the SDK
-		const f = fixture();
-		process.env.PARAGLIDE_MCP_FORCE_SDK = "1";
-		expect(parseDirectProject(f.projectPath)).not.toBeNull();
-	});
 });
 
 describe("direct writes", () => {
@@ -139,6 +135,31 @@ describe("direct writes", () => {
 		expect(f.readMessages("de").welcome).toBe("Hallo {name}!");
 	});
 
+	it("translate-loop calls read only the source and target locale files", async () => {
+		const f = fixture();
+		// invalid JSON in fr: any operation that reads it must throw, so a
+		// passing de translate loop proves fr was never read
+		fs.writeFileSync(path.join(f.messagesDir, "fr.json"), "{ not json");
+
+		const service = new TranslationService(f.projectPath);
+		const batch = await service.getTranslationBatch({
+			targetLocale: "de",
+			batchSize: 10,
+		});
+		expect(batch.items.length).toBeGreaterThan(0);
+		const result = await service.saveTranslations({
+			targetLocale: "de",
+			translations: batch.items.map((item) => ({
+				key: item.key,
+				value: typeof item.source === "string" ? `DE:${item.source}` : item.source,
+			})),
+		});
+		expect(result.failed).toBe(0);
+
+		// full-snapshot operations do read every locale and must surface the error
+		expect(() => service.projectInfo()).toThrow(/invalid JSON/);
+	});
+
 	it("respects the plugin's sort setting", async () => {
 		const f = fixture();
 		patchSettings(f, (s) => {
@@ -162,73 +183,38 @@ describe("direct writes", () => {
 	});
 });
 
-describe("SDK fallback (PARAGLIDE_MCP_FORCE_SDK)", () => {
-	it("produces the same results as the fast path", async () => {
-		const run = async () => {
-			const f = fixture();
-			const service = new TranslationService(f.projectPath);
-			const info = await service.projectInfo();
-			const batch = await service.getTranslationBatch({ targetLocale: "fr" });
-			const save = await service.saveTranslations({
-				targetLocale: "fr",
-				translations: [{ key: "greeting", value: "Bonjour {name}!" }],
-			});
-			return {
-				info: { ...info, projectPath: "<varies>" },
-				batchKeys: batch.items.map((i) => i.key),
-				remaining: batch.remaining,
-				save,
-				frFile: f.readMessages("fr"),
-			};
-		};
+describe("file cache", () => {
+	it("shares writes across service instances and picks up external edits", () => {
+		const f = fixture();
+		const a = new TranslationService(f.projectPath);
+		const b = new TranslationService(f.projectPath);
 
-		const fast = await run();
-		process.env.PARAGLIDE_MCP_FORCE_SDK = "1";
-		const sdk = await run();
+		// warm the cache via a, write through a — b must see the new value
+		a.getTranslationBatch({ targetLocale: "fr", batchSize: 10 });
+		a.saveTranslations({
+			targetLocale: "fr",
+			translations: [{ key: "hello_world", value: "Bonjour le monde!" }],
+		});
+		expect(
+			b.getMessages({ keys: ["hello_world"], locales: ["fr"] }).messages[0]!
+				.translations.fr
+		).toBe("Bonjour le monde!");
 
-		expect(fast).toEqual(sdk);
-	});
-
-	it("deletes and renames identically to the fast path", async () => {
-		const run = async () => {
-			const f = fixture();
-			const service = new TranslationService(f.projectPath);
-			const deletion = await service.deleteMessages({
-				keys: ["hello_world", "does_not_exist"],
-			});
-			const rename = await service.renameMessage({
-				key: "greeting",
-				newKey: "welcome",
-			});
-			return {
-				deletion,
-				rename,
-				enFile: f.readMessages("en"),
-				deFile: f.readMessages("de"),
-			};
-		};
-
-		const fast = await run();
-		process.env.PARAGLIDE_MCP_FORCE_SDK = "1";
-		const sdk = await run();
-
-		expect(fast.deletion).toEqual(sdk.deletion);
-		expect(fast.rename).toEqual(sdk.rename);
-		for (const locale of ["enFile", "deFile"] as const) {
-			expect(fast[locale].hello_world).toBeUndefined();
-			expect(sdk[locale].hello_world).toBeUndefined();
-			expect(fast[locale].greeting).toBeUndefined();
-			expect(sdk[locale].greeting).toBeUndefined();
-			expect(sdk[locale].welcome).toEqual(fast[locale].welcome);
-		}
-		expect(fast.enFile.welcome).toBe("Hello {name}!");
+		// external edit invalidates the cached entry via the stat check
+		const enPath = path.join(f.messagesDir, "en.json");
+		const en = JSON.parse(fs.readFileSync(enPath, "utf8"));
+		en.hello_world = "Hi there, world!";
+		fs.writeFileSync(enPath, JSON.stringify(en, null, "\t"));
+		expect(
+			b.getMessages({ keys: ["hello_world"], locales: ["en"] }).messages[0]!
+				.translations.en
+		).toBe("Hi there, world!");
 	});
 });
 
 describe("locale management file handling", () => {
-	it("seeds and deletes message files even when the fast path is disabled", async () => {
+	it("seeds and deletes message files", async () => {
 		const f = fixture();
-		process.env.PARAGLIDE_MCP_FORCE_SDK = "1";
 		const service = new TranslationService(f.projectPath);
 
 		const added = await service.addLocale({ locale: "es" });
@@ -240,18 +226,22 @@ describe("locale management file handling", () => {
 		expect(fs.existsSync(path.join(f.messagesDir, "es.json"))).toBe(false);
 	});
 
-	it("skips file handling when the message file location is not resolvable", async () => {
+	it("rejects locale changes without touching settings when the project is unsupported", async () => {
 		const f = fixture();
-		// array pathPattern: multiple files per locale — location not resolvable
+		// array pathPattern: multiple files per locale — unsupported
 		patchSettings(f, (s) => {
 			(s["plugin.inlang.messageFormat"] as Record<string, unknown>).pathPattern =
 				["./messages/{locale}.json"];
 		});
 		const service = new TranslationService(f.projectPath);
 
-		const added = await service.addLocale({ locale: "es" });
-		expect(added.messageFileCreated).toBe(false);
-		expect(added.locales).toContain("es");
-		expect(fs.existsSync(path.join(f.messagesDir, "es.json"))).toBe(false);
+		expect(() => service.addLocale({ locale: "es" })).toThrow(
+			/only supports inlang message-format projects/
+		);
+		// settings must not be half-applied
+		const settings = JSON.parse(
+			fs.readFileSync(path.join(f.projectPath, "settings.json"), "utf8")
+		);
+		expect(settings.locales).not.toContain("es");
 	});
 });

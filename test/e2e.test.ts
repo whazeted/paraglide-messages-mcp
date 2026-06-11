@@ -167,12 +167,13 @@ describe("paraglide-mcp end to end", () => {
 		expect(result.isError).toBe(true);
 	});
 
-	it("exposes the three workflow prompts", async () => {
+	it("exposes the four workflow prompts", async () => {
 		const { prompts } = await client.listPrompts();
 		expect(prompts.map((p) => p.name).sort()).toEqual([
 			"review_locale",
 			"translate_locale",
 			"translate_prefix",
+			"translate_project",
 		]);
 		const translatePrefix = prompts.find((p) => p.name === "translate_prefix");
 		expect(

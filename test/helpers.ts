@@ -18,9 +18,9 @@ export interface FixtureProject {
  *   <tmp>/project.inlang/settings.json
  *   <tmp>/messages/<locale>.json        (one per locale, $schema added)
  *
- * `modules` is left empty so tests never touch the network — the server's
- * bundled message-format plugin fallback kicks in (the same path an offline
- * user without a plugin cache hits).
+ * `modules` is left empty — the server resolves the message file locations
+ * from the `plugin.inlang.messageFormat` settings alone and never touches
+ * the network.
  */
 export function scaffoldProject(args: {
 	baseLocale: string;

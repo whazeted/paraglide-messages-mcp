@@ -1,11 +1,6 @@
 export { createServer, SERVER_VERSION } from "./server.js";
 export { TranslationService } from "./core/service.js";
-export {
-	discoverProjectPath,
-	withProject,
-	saveProject,
-	pickPluginKey,
-} from "./core/project.js";
+export { discoverProjectPath } from "./core/project.js";
 export {
 	extractPlaceholders,
 	placeholdersOf,

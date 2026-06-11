@@ -122,9 +122,7 @@ describe("listKeys", () => {
 	});
 
 	it("rejects unknown locales", async () => {
-		await expect(
-			service.listKeys({ locale: "xx", status: "missing" })
-		).rejects.toThrow(/unknown locale/);
+		expect(() => service.listKeys({ locale: "xx", status: "missing" })).toThrow(/unknown locale/);
 	});
 });
 
@@ -173,7 +171,7 @@ describe("getMessages", () => {
 	});
 
 	it("requires keys or prefix", async () => {
-		await expect(service.getMessages({})).rejects.toThrow(/keys or a prefix/);
+		expect(() => service.getMessages({})).toThrow(/keys or a prefix/);
 	});
 });
 
@@ -236,12 +234,10 @@ describe("searchMessages", () => {
 	});
 
 	it("rejects an empty query and unknown locales", async () => {
-		await expect(service.searchMessages({ query: "  " })).rejects.toThrow(
+		expect(() => service.searchMessages({ query: "  " })).toThrow(
 			/query must not be empty/
 		);
-		await expect(
-			service.searchMessages({ query: "x", locales: ["nl"] })
-		).rejects.toThrow(/unknown locale/);
+		expect(() => service.searchMessages({ query: "x", locales: ["nl"] })).toThrow(/unknown locale/);
 	});
 });
 
@@ -288,9 +284,7 @@ describe("getTranslationBatch", () => {
 	});
 
 	it("rejects equal source and target locales", async () => {
-		await expect(
-			service.getTranslationBatch({ targetLocale: "en" })
-		).rejects.toThrow(/must differ/);
+		expect(() => service.getTranslationBatch({ targetLocale: "en" })).toThrow(/must differ/);
 	});
 });
 
@@ -530,7 +524,7 @@ describe("deleteMessages", () => {
 	});
 
 	it("requires a non-empty batch", async () => {
-		await expect(service.deleteMessages({ keys: [] })).rejects.toThrow(
+		expect(() => service.deleteMessages({ keys: [] })).toThrow(
 			/must not be empty/
 		);
 	});
@@ -571,26 +565,18 @@ describe("renameMessage", () => {
 	});
 
 	it("rejects an unknown source key", async () => {
-		await expect(
-			service.renameMessage({ key: "does_not_exist", newKey: "whatever" })
-		).rejects.toThrow(/unknown message key/);
+		expect(() => service.renameMessage({ key: "does_not_exist", newKey: "whatever" })).toThrow(/unknown message key/);
 	});
 
 	it("rejects a new key that already exists", async () => {
-		await expect(
-			service.renameMessage({ key: "greeting", newKey: "hello_world" })
-		).rejects.toThrow(/already exists/);
+		expect(() => service.renameMessage({ key: "greeting", newKey: "hello_world" })).toThrow(/already exists/);
 		// nothing was changed
 		expect(fixture.readMessages("en").greeting).toBe("Hello {name}!");
 	});
 
 	it("rejects identical and empty new keys", async () => {
-		await expect(
-			service.renameMessage({ key: "greeting", newKey: "greeting" })
-		).rejects.toThrow(/must differ/);
-		await expect(
-			service.renameMessage({ key: "greeting", newKey: "" })
-		).rejects.toThrow(/must not be empty/);
+		expect(() => service.renameMessage({ key: "greeting", newKey: "greeting" })).toThrow(/must differ/);
+		expect(() => service.renameMessage({ key: "greeting", newKey: "" })).toThrow(/must not be empty/);
 	});
 });
 
@@ -737,10 +723,10 @@ describe("addLocale", () => {
 	});
 
 	it("rejects duplicates and empty tags", async () => {
-		await expect(service.addLocale({ locale: "de" })).rejects.toThrow(
+		expect(() => service.addLocale({ locale: "de" })).toThrow(
 			/already in the project/
 		);
-		await expect(service.addLocale({ locale: "  " })).rejects.toThrow(
+		expect(() => service.addLocale({ locale: "  " })).toThrow(
 			/must not be empty/
 		);
 	});
@@ -777,7 +763,7 @@ describe("removeLocale", () => {
 	});
 
 	it("refuses to remove the base locale", async () => {
-		await expect(service.removeLocale({ locale: "en" })).rejects.toThrow(
+		expect(() => service.removeLocale({ locale: "en" })).toThrow(
 			/base locale/
 		);
 		expect(readSettings().locales).toEqual(["en", "de", "fr"]);
@@ -787,7 +773,7 @@ describe("removeLocale", () => {
 	});
 
 	it("rejects unknown locales", async () => {
-		await expect(service.removeLocale({ locale: "nl" })).rejects.toThrow(
+		expect(() => service.removeLocale({ locale: "nl" })).toThrow(
 			/unknown locale/
 		);
 	});

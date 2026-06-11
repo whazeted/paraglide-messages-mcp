@@ -6,11 +6,11 @@ import { unknownLocaleError } from "./queries.js";
 /**
  * Locale management: adding/removing entries in the `locales` array of
  * `project.inlang/settings.json`, plus seeding or deleting the corresponding
- * message file for message-format projects.
+ * message file.
  *
  * This deliberately edits settings.json directly instead of going through
- * ProjectStorage: both storage paths read settings fresh from that file on
- * every call (the server is stateless), so the edit takes effect immediately.
+ * storage.ts: every operation reads settings fresh from that file (the
+ * server is stateless), so the edit takes effect immediately.
  * Locale tags are taken as-is apart from trimming — the server is not
  * opinionated about tag formats; agents use whatever convention the project
  * already follows.
@@ -49,16 +49,17 @@ export function addLocale(
 	if (locales.includes(tag)) {
 		throw new Error(`locale '${tag}' is already in the project`);
 	}
+	// resolve the message file location before touching settings, so an
+	// unsupported project errors without leaving a half-applied change
+	const direct = parseDirectProject(projectPath, settings);
 
 	const next = [...locales, tag];
 	settings.locales = next;
 	writeSettings(settingsPath, settings);
 
-	// seed an empty message file for message-format projects so the locale is
-	// visible to the compiler and editors immediately; other plugins create
-	// their files on first save
-	const direct = parseDirectProject(projectPath, settings);
-	const messageFileCreated = direct ? seedDirectLocale(direct, tag) : false;
+	// seed an empty message file so the locale is visible to the compiler
+	// and editors immediately
+	const messageFileCreated = seedDirectLocale(direct, tag);
 
 	return { locale: tag, locales: next, messageFileCreated };
 }
@@ -82,12 +83,10 @@ export function removeLocale(
 	// then update settings
 	let messageFileDeleted = false;
 	const direct = parseDirectProject(projectPath, settings);
-	if (direct) {
-		const filePath = direct.fileFor(tag);
-		if (nodeFs.existsSync(filePath)) {
-			nodeFs.rmSync(filePath);
-			messageFileDeleted = true;
-		}
+	const filePath = direct.fileFor(tag);
+	if (nodeFs.existsSync(filePath)) {
+		nodeFs.rmSync(filePath);
+		messageFileDeleted = true;
 	}
 
 	const next = locales.filter((l) => l !== tag);

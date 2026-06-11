@@ -3,11 +3,14 @@
 An MCP (Model Context Protocol) server for translating [Paraglide JS](https://inlang.com/m/gerre34r/library-inlang-paraglideJs) / [inlang](https://inlang.com) projects.
 
 The agent calling the tools **is** the translator. The server's job is to make
-that safe and efficient: it serves messages in small batches, validates every
-translation against the source (placeholders, markup, variant structure)
+that safe and efficient: it serves messages in per-locale batches, validates
+every translation against the source (placeholders, markup, variant structure)
 before anything is written, and reports progress so the agent knows exactly
 when a locale is done. Faulty items are rejected individually — one bad
-translation never blocks or corrupts the rest of the batch.
+translation never blocks or corrupts the rest of the batch, which is what
+makes large batches safe. The translate loop reads and writes only the source
+and target locale's files, so one agent (or subagent) per locale can run in
+parallel without interfering with the others.
 
 ## Quick start
 
@@ -30,18 +33,18 @@ Add this to your project's `.mcp.json` (Claude Code) or
 the working directory, then for a single `*.inlang` directory up to one level
 deep.
 
-The server is stateless — it loads your inlang project from disk per tool
-call and writes changes straight back through your project's own inlang
-plugin (e.g. `@inlang/plugin-message-format`), so `messages/{locale}.json`
-files always stay in the exact format the rest of your toolchain expects.
-External edits (your editor, the Paraglide compiler, git) are always picked
-up. If the configured plugin can't be fetched (offline, no cache), a bundled
-copy of the message-format plugin is used as a fallback.
+The server holds no translation state — every tool call checks your
+`messages/{locale}.json` files on disk (re-parsing only the ones that
+changed, via a stat-validated cache) and writes changes back in the exact
+format the inlang message-format plugin produces (`$schema` header, tab
+indentation, optional key sort), so the rest of your toolchain sees no
+difference. External edits (your editor, the Paraglide compiler, git) are
+always picked up. No network access is ever needed.
 
-Works with the standard Paraglide JS setup out of the box, and with i18next,
-next-intl, and ICU MessageFormat projects through their inlang plugins — see
-[COMPATIBILITY.md](COMPATIBILITY.md) for the full support matrix (and why
-PO/XLIFF are not supported).
+Requires the standard Paraglide JS setup: the message format plugin with a
+single message file per locale — see [COMPATIBILITY.md](COMPATIBILITY.md)
+for the exact criteria and why other inlang plugins (i18next, next-intl,
+ICU) are not supported.
 
 ## Tools
 
@@ -51,9 +54,9 @@ PO/XLIFF are not supported).
 | `list_message_keys` | Keys only (cheap), filterable by key prefix (`startsWith`) and per-locale status (`missing` / `translated`), with cursor pagination. |
 | `get_messages` | Full message content by exact keys or prefix, optionally restricted to specific locales. |
 | `search_messages` | Find messages by text content or key substring (case-insensitive) — for when you know the UI text ("Add to cart") but not the key. |
-| `get_translation_batch` | The next *N* untranslated messages for a target locale (default 5, max 25), with source text, required placeholders, and a `remaining` counter. |
-| `save_translations` | Validate and persist translations for one locale (max 25 per call). Per-item results; valid items are saved even when others fail. |
-| `delete_messages` | Delete messages by key from every locale (max 25 per call). Unknown keys are rejected individually while the rest are still deleted. |
+| `get_translation_batch` | The next *N* untranslated messages for a target locale (default 50, max 200), with source text, required placeholders, and a `remaining` counter. Reads only the source and target locale files. |
+| `save_translations` | Validate and persist translations for one locale (max 200 per call). Per-item results; valid items are saved even when others fail. Writes only the target locale's file. |
+| `delete_messages` | Delete messages by key from every locale (max 200 per call). Unknown keys are rejected individually while the rest are still deleted. |
 | `rename_message` | Rename a message key across every locale, keeping all translated values. Fails without changes when the old key is missing or the new key is taken. |
 | `add_locale` | Add a locale to the project settings (and seed an empty message file for message-format projects). Locale tags are stored as-is — no format opinion. |
 | `remove_locale` | Remove a locale from the settings and delete its message file. Reports how many translations were discarded; the base locale can't be removed. |
@@ -68,6 +71,7 @@ launch them directly without the bundled skill:
 | --- | --- | --- |
 | `translate_locale` | `targetLocale`, `sourceLocale?` | Translate all missing messages into one locale via the batch loop. |
 | `translate_prefix` | `prefix`, `targetLocale`, `sourceLocale?` | Same loop, scoped to keys starting with `prefix`. |
+| `translate_project` | `locales?`, `prefix?` | Translate every locale at once: the main agent settles a style brief (tone, formality, glossary), then fans out one subagent per locale in parallel. |
 | `review_locale` | `locale`, `prefix?` | Review existing translations against the base locale and fix problems. |
 
 Locale and prefix arguments support MCP completion: locales are suggested from
@@ -89,15 +93,17 @@ support MCP completion, like the prompt arguments.
 
 ### The translation loop
 
-Agents translate iteratively — small batches keep the error rate low while
-the loop keeps throughput high (no re-reading of the full catalog between
-steps, and `remaining` tells the agent exactly when to stop):
+Agents translate iteratively — per-item validation keeps the error rate low
+while large batches and the loop keep throughput high (no re-reading of the
+full catalog between steps, and `remaining` tells the agent exactly when to
+stop). Because each locale's loop only touches its own files, the per-locale
+loops can run as parallel subagents (see the `translate_project` prompt):
 
 ```
-project_info
-└─ for each target locale:
-   ┌─> get_translation_batch { targetLocale: "de", batchSize: 5 }
-   │   ... agent translates the 5 items ...
+project_info  +  style brief (tone, formality, glossary)
+└─ one (sub)agent per target locale, in parallel:
+   ┌─> get_translation_batch { targetLocale: "de", batchSize: 50 }
+   │   ... agent translates the 50 items ...
    │   save_translations { targetLocale: "de", translations: [...] }
    └── repeat until done == true
 ```
@@ -106,7 +112,7 @@ Scope work to a subsection of the catalog with `prefix`, e.g. only
 `checkout_*` messages:
 
 ```json
-{ "targetLocale": "de", "prefix": "checkout_", "batchSize": 5 }
+{ "targetLocale": "de", "prefix": "checkout_", "batchSize": 50 }
 ```
 
 ### Message values
@@ -201,11 +207,11 @@ pnpm bench       # performance benchmark (see PERFORMANCE.md)
 pnpm build
 ```
 
-Integration and e2e tests run against a real inlang project fixture on disk
-using the actual `@inlang/sdk` — no mocks.
+Integration and e2e tests run against real inlang project fixtures on disk —
+no mocks.
 
-Message-format projects are read and written directly as JSON instead of
-through the SDK's load/save cycle — see [PERFORMANCE.md](PERFORMANCE.md) for
+Message files are read and written directly as JSON (no inlang SDK), scoped
+to the locales each call needs — see [PERFORMANCE.md](PERFORMANCE.md) for
 the measurements and rationale.
 
 ### Releasing

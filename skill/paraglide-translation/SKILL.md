@@ -6,10 +6,11 @@ description: Translate Paraglide JS / inlang messages via the paraglide MCP serv
 # Translating Paraglide / inlang messages
 
 You are the translator. The `paraglide` MCP server gives you the messages and
-validates + writes your translations. Work in small batches — never try to
-translate everything in one call.
+validates + writes your translations. Work locale by locale in batches — the
+server validates every item individually, so a bad translation in a batch is
+rejected on its own instead of sinking the call.
 
-## Workflow
+## Workflow (single locale)
 
 1. **`project_info`** — learn the base locale, target locales, and how many
    messages are missing per locale. Confirm with the user which locale(s) and
@@ -17,8 +18,9 @@ translate everything in one call.
    with any style preferences (tone, formality, terminology).
 2. Loop until `done` is true:
    a. **`get_translation_batch`** with `targetLocale` (and `prefix` if
-      scoping). Keep the default `batchSize` of 5; use up to 10 only for very
-      short UI strings (buttons, labels).
+      scoping). Use the default `batchSize` of 50 (max 200 — defaults and
+      limits come from `src/core/constants.ts`); raise it for short UI
+      strings, drop to 5–10 for long, nuanced prose.
    b. Translate each item's `source` into the target locale.
    c. **`save_translations`** with the same keys. The server validates each
       item; check `results` for per-item errors, fix only the failed items,
@@ -26,6 +28,30 @@ translate everything in one call.
 3. When `remaining` is 0, report a short summary (how many messages, which
    locales). Suggest the user runs their Paraglide compile step (usually part
    of `dev`/`build`) if they want to see the result in the app.
+
+## Translating many locales: one subagent per locale
+
+Each locale lives in its own message file, and `get_translation_batch` /
+`save_translations` only read and write the source and target locale — so
+per-locale agents cannot interfere with each other. When more than one locale
+needs translation, fan out instead of going locale after locale:
+
+1. **Settle the style brief first** (main agent, before delegating). Sample
+   representative messages with `get_messages`, then write a short brief:
+   tone and voice; formality/address per target language where the language
+   forces a choice (German *Sie*/*du*, Dutch *u*/*je*, formal vs. plain
+   Japanese, …); a glossary of recurring product terms (and which stay
+   untranslated, e.g. brand names); and the non-negotiables (preserve
+   `{placeholder}` names and markup exactly, adapt plural match cases per
+   language). Ask the user when unclear, otherwise decide and state the brief
+   in your summary.
+2. **Spawn one subagent per target locale, in parallel.** Each subagent gets
+   the style brief verbatim, its single locale, and the single-locale
+   workflow above. A subagent translates only its own locale — never others.
+3. **Verify and report** (main agent, after all subagents finish): call
+   `project_info` and confirm `missing` is 0 for every target; re-dispatch a
+   subagent for any locale with leftovers. Summarize the brief, per-locale
+   counts, and anything subagents flagged as ambiguous.
 
 The server also exposes read-only resources mirroring the read tools —
 `paraglide://project/info`, `paraglide://locales/{locale}/missing`, and

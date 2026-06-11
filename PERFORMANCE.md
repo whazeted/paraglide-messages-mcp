@@ -93,17 +93,15 @@ writing them requires the SDK, so the server now accesses them directly
    values into the already-loaded snapshot in memory, instead of re-exporting
    the whole project a second time. (This applies to the SDK path too.)
 
-The fast path applies only when it is provably equivalent to what the SDK
-would do: `plugin.inlang.messageFormat` settings with a single string
-`pathPattern`, and no other import/export plugin module configured. Projects
-with a `pathPattern` array (multi-file namespaces) or other plugins
-(i18next, etc.) transparently fall back to the SDK path, which is unchanged.
-Setting the `PARAGLIDE_MCP_FORCE_SDK` environment variable forces the SDK
-path as an escape hatch. An equivalence test
-([test/direct.test.ts](test/direct.test.ts)) verifies both paths produce
-identical results, and the server remains fully stateless — every call still
-reads fresh from disk, so external edits (compiler, editor, git) are always
-picked up.
+At this stage the fast path applied only when it was provably equivalent to
+what the SDK would do: `plugin.inlang.messageFormat` settings with a single
+string `pathPattern`, and no other import/export plugin module configured.
+Other projects transparently fell back to the SDK path, and a
+`PARAGLIDE_MCP_FORCE_SDK` escape hatch plus an equivalence test guarded the
+two implementations. (The SDK path has since been removed entirely — see
+"Dropping the SDK" below.) The server remains fully stateless — every call
+still reads fresh from disk, so external edits (compiler, editor, git) are
+always picked up.
 
 ### Small project (250 messages, 11 locales)
 
@@ -138,3 +136,166 @@ the storage format. Server overhead per tool call is now effectively flat
 (single-digit milliseconds) instead of growing with project size, so total
 translation-run overhead grows linearly with message count instead of
 quadratically.
+
+## Concurrent per-locale subagents
+
+Every locale lives in its own JSON file and `save_translations` writes only
+the target locale's file, so a client agent can fan out one subagent per
+locale and translate all locales concurrently instead of one after another.
+
+Benchmark: [test/benchmark-subagents.test.ts](test/benchmark-subagents.test.ts),
+run with `pnpm bench:subagents`. It does *full, real* translation runs (no
+extrapolation, every read and write hits disk) of all 10 target locales on an
+XL fixture — **5,000 messages × 11 locales** — in two orchestrations:
+
+- **sequential** (before): one agent, locale after locale
+- **subagents** (after): 10 concurrent per-locale translate loops against the
+  same server process — the topology subagents actually have, since they
+  share the parent session's MCP server connection
+
+Each orchestration is measured twice: with zero agent latency (pure server
+I/O cost) and with 25 ms simulated agent latency per cycle, a scaled-down
+stand-in for the time the model itself spends producing a batch of
+translations (in reality seconds, not milliseconds). After every run, each
+target file is verified to contain every key with exactly the expected value
+for *that* locale, and the base file to be byte-identical — so lost writes or
+cross-locale contamination would fail the benchmark.
+
+### Baseline (full-snapshot reads, batch 25)
+
+Before the scoped-read architecture below, every tool call re-read **all 11
+locale files**, and batches were capped at 25:
+
+| scenario | wall time | vs sequential |
+| --- | --- | --- |
+| sequential, no agent latency | 92.1 s | — |
+| subagents, no agent latency | 96.5 s | 1.05× slower |
+| sequential + 25 ms agent latency/cycle | 146.5 s | — |
+| subagents + 25 ms agent latency/cycle | **96.1 s** | **1.52× faster** |
+
+Two findings from this baseline:
+
+1. **It is safe.** All runs produced byte-correct results. Within one server
+   process the direct path's file I/O is synchronous, so every tool call
+   reads and writes atomically with respect to the others — concurrent
+   per-locale loops cannot tear each other's files, and since each save
+   touches only its own locale's file there are no write conflicts to begin
+   with.
+2. **Agent time is what parallelizes, server work is not** (same total work
+   on one thread, ~5% scheduling overhead). But the full-snapshot reads put
+   the server floor at ~46 ms per cycle (~92 s per full run) — parsing 9
+   locale files the call never used.
+
+## Scoped reads + large per-locale batches
+
+### What changed
+
+The translate loop is a *per-locale* operation, so it no longer touches the
+rest of the project:
+
+1. **`get_translation_batch` reads only the source and target locale files**
+   (plus the base locale when it differs); **`save_translations` reads base +
+   target and writes only the target file** (see `ReadOptions` in
+   [src/core/storage.ts](src/core/storage.ts)). A per-locale subagent's calls
+   never read or write a sibling locale's file — verified by a test that
+   corrupts an unrelated locale file and translates another locale anyway.
+   Full-project operations (`project_info`, `list_message_keys`,
+   `get_messages`, `search_messages`, delete/rename) still load every locale.
+2. **Batch limits were raised for per-locale throughput**
+   ([src/core/constants.ts](src/core/constants.ts)): default batch size 5 →
+   50, max batch/save size 25 → 200. Large batches are safe because
+   validation is per item — a bad translation is rejected individually, never
+   the whole call.
+3. **Orchestration is now first-class**: the `translate_project` prompt (and
+   the bundled skill) has the main agent settle a style brief — tone,
+   per-language formality, glossary — *before* fanning out one subagent per
+   locale, so all locales translate in parallel with a shared style.
+
+One deliberate semantic consequence: `save_translations`' unknown-key check
+now sees the keys of base + target only, so a key existing *only* in some
+third locale needs `allowNewKeys: true`.
+
+### Results (same XL fixture and machine, after the change)
+
+| scenario | wall time | vs baseline |
+| --- | --- | --- |
+| batch 25, sequential, no agent latency | 37.5 s | 2.5× faster |
+| batch 25, subagents, no agent latency | 37.1 s | 2.6× faster |
+| batch 25, sequential + 25 ms agent latency/cycle | 94.2 s | 1.6× faster |
+| batch 25, subagents + 25 ms agent latency/cycle | 36.3 s | 2.6× faster |
+| batch 200, sequential, no agent latency | 4.9 s | 19× faster |
+| batch 200, subagents, no agent latency | 4.8 s | 20× faster |
+| batch 200, subagents + 25 ms agent latency/cycle | **4.9 s** | **20–30× faster** |
+
+All runs byte-verified, as before. Scoped reads cut the pure server cost
+2.5× (a cycle reads 2 files instead of 11); batch 200 cuts the number of
+cycles 8× on top of that, taking a full 10-locale run of a 5,000-message
+project from ~96 s of server time to **under 5 s**. With agent latency in the
+picture the combined effect is larger (146.5 s → 4.9 s in the simulated run),
+and in reality — where producing a batch takes the model seconds, not 25 ms —
+the dominant win remains fanning out: ten locales' worth of model time runs
+in parallel while the server's ~5 s of I/O disappears into it.
+
+## Dropping the SDK
+
+With the scoped-read architecture in place, the inlang SDK fallback was
+removed entirely: direct message-format file access is the only storage
+backend, and unsupported projects (other plugins, multi-file `pathPattern`
+arrays) fail fast with a clear error instead of degrading to the slow path
+(see [COMPATIBILITY.md](COMPATIBILITY.md)). Beyond deleting code, this
+matters for the parallel-agent design:
+
+- The SDK path rewrote **every** locale file on each save, so concurrent
+  per-locale agents on that path would have clobbered each other. Now
+  parallel-safety is a guarantee of the only path, not a property of the
+  common one.
+- All project I/O is synchronous, so every tool call is atomic with respect
+  to concurrent calls in the same process by construction.
+- `@inlang/sdk` and the bundled `@inlang/plugin-message-format` left the
+  dependency tree (runtime deps are now just the MCP SDK, `flat`, and `zod`)
+  — no sqlite-wasm instantiation at startup, faster `npx` cold start, and
+  fully offline operation.
+
+## Native to the concurrent model: shared parsed files, synchronous service
+
+With one storage backend, two more changes made the architecture native to
+the per-locale-subagent topology:
+
+1. **A stat-validated, write-through file cache**
+   ([src/core/direct.ts](src/core/direct.ts)). All subagents share one
+   parsed copy of each locale file: the first reader parses, every later
+   call — any subagent, any service instance — pays a `statSync` (mtime +
+   size check) instead of a parse. Saves update the cache write-through, so
+   a subagent's own steady-state translate cycle reads via two stats and
+   pays only for its one file write. This is the server-side version of
+   "the main agent distributes the source locale to the subagents":
+   distributing message content through agent prompts would cost far more
+   in tokens than the reads cost in milliseconds and would still leave save
+   validation needing the base file — sharing the parsed base in-process
+   gives the same reduction with validation intact. External edits
+   (compiler, editor, git) still invalidate via the stat check, so observed
+   behavior stays "always fresh".
+2. **`TranslationService` is synchronous** — the async façade was an SDK
+   vestige. Sync signatures encode the atomicity guarantee in the type
+   system: a tool call cannot interleave with another, by construction.
+   (`pluginKey` threading, another SDK-era leftover, was removed the same
+   way — it is a constant now.)
+
+### Results (same XL fixture and machine, cache vs. scoped reads alone)
+
+| scenario | scoped reads | + file cache |
+| --- | --- | --- |
+| batch 25, sequential, no agent latency | 37.5 s | 23.5 s |
+| batch 25, subagents, no agent latency | 37.1 s | 22.8 s |
+| batch 25, subagents + 25 ms agent latency/cycle | 36.3 s | 23.2 s |
+| batch 200, sequential, no agent latency | 4.9 s | 3.1 s |
+| batch 200, subagents, no agent latency | 4.8 s | **3.0 s** |
+| batch 200, subagents + 25 ms agent latency/cycle | 4.9 s | **3.1 s** |
+
+All runs byte-verified, as always. The standard benchmark improved the same
+way (large-project full `de` run: 1.5 s → 0.9 s; one-off reads at 2,000
+messages: 1–2 ms). What remains of the ~3 s is dominated by the 2,500
+target-file writes themselves (unflatten + serialize + write of files
+growing to ~600 KB) — reads are effectively free now, so the full
+translation pipeline is bounded by the agent's own translation speed plus
+the cost of physically writing the results.

@@ -34,10 +34,12 @@ const localesAfterChangeSchema = z
 	.describe("the project's locales after the change");
 
 /**
- * Registers the translation tools. They are designed for *small-batch*
- * translation: agents pull a handful of messages, translate them, save them,
- * and repeat until `remaining` is 0. Validation happens server-side on every
- * save so mistakes surface immediately instead of corrupting message files.
+ * Registers the translation tools. They are designed for *per-locale batch*
+ * translation: an agent (or one subagent per locale, running in parallel)
+ * pulls a batch of messages for its locale, translates them, saves them, and
+ * repeats until `remaining` is 0. Validation happens server-side per item on
+ * every save so mistakes are rejected individually instead of corrupting
+ * message files, which is what makes large batches safe.
  */
 export function registerTools(
 	server: McpServer,
@@ -205,11 +207,13 @@ export function registerTools(
 		{
 			title: "Get translation batch",
 			description:
-				"Get the next small batch of untranslated messages for a target locale (optionally " +
+				"Get the next batch of untranslated messages for a target locale (optionally " +
 				"limited to a key prefix). Returns the source text, required placeholders, and the " +
 				"number of remaining untranslated messages. Workflow: call this, translate the items, " +
-				"save them with save_translations, then call this again until `done` is true. Keep " +
-				`batches small (default ${DEFAULT_BATCH_SIZE}) — accuracy beats batch size.`,
+				"save them with save_translations, then call this again until `done` is true. " +
+				`Default batch size is ${DEFAULT_BATCH_SIZE}; raise it (max ${MAX_BATCH_SIZE}) for short UI strings, ` +
+				"drop to 5-10 for long, nuanced prose. Reads only the source and target locale " +
+				"files, so per-locale agents can run in parallel without touching each other's locales.",
 			inputSchema: {
 				targetLocale: z.string().describe("locale to translate into"),
 				sourceLocale: z
@@ -280,9 +284,7 @@ export function registerTools(
 					)
 					.min(1)
 					.max(MAX_SAVE_BATCH)
-					.describe(
-						`translations to save (max ${MAX_SAVE_BATCH} per call — keep batches small)`
-					),
+					.describe(`translations to save (max ${MAX_SAVE_BATCH} per call)`),
 				allowNewKeys: z
 					.boolean()
 					.optional()

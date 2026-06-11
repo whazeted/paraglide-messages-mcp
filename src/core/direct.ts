@@ -1,57 +1,82 @@
 import nodeFs from "node:fs";
 import path from "node:path";
 import { flatten, unflatten } from "flat";
-import { MESSAGE_FORMAT_PLUGIN_KEY } from "./project.js";
 import type { LocaleMessages, MessagesSnapshot } from "./types.js";
 
 /**
- * Direct file access for inlang message-format projects.
- *
- * The inlang SDK loads every message of every locale into an internal SQLite
- * database on `loadProjectFromDirectory`, and `saveProjectToDirectory`
- * rewrites every locale file — per-call cost grows with total project size
- * (see PERFORMANCE.md). For the by far most common setup, the message-format
- * plugin, the message files are plain JSON in a known location, so this
- * module reads and writes them directly. Projects using other plugins (or
- * a multi-file `pathPattern`) keep going through the SDK.
+ * Direct file access for inlang message-format projects — the only storage
+ * backend. The message files are plain JSON in a known location
+ * (`pathPattern`), so every read and write goes straight to those files; all
+ * I/O is synchronous, which makes each tool call atomic with respect to
+ * concurrent per-locale agents in the same process (see PERFORMANCE.md).
+ * Projects using other inlang plugins or a multi-file `pathPattern` are not
+ * supported (see COMPATIBILITY.md).
  */
 
+export const MESSAGE_FORMAT_PLUGIN_KEY = "plugin.inlang.messageFormat";
+
 const MESSAGE_FILE_SCHEMA = "https://inlang.com/schema/inlang-message-format";
+
+const UNSUPPORTED_PROJECT =
+	"paraglide-mcp only supports inlang message-format projects: settings.json " +
+	`must configure "${MESSAGE_FORMAT_PLUGIN_KEY}" with a single string ` +
+	'pathPattern containing "{locale}", and no other import/export plugin ' +
+	"module. See COMPATIBILITY.md.";
 
 export interface DirectProject {
 	baseLocale: string;
 	locales: string[];
-	pluginKey: string;
 	sort?: "asc" | "desc";
 	fileFor(locale: string): string;
 }
 
 /**
- * Returns direct file access for the project, or null when the project must
- * go through the SDK instead. Direct access requires:
+ * Per-file cache of parsed locale files, validated by stat (mtime + size) on
+ * every read and updated write-through on every save. This is what lets N
+ * concurrent per-locale agents share ONE parsed copy of the base locale
+ * instead of each re-parsing it on every call: the first reader parses, every
+ * later call (any agent, any service instance) pays only a statSync.
+ *
+ * Statelessness is preserved observably — every read still stats the file,
+ * so external edits (compiler, editor, git) invalidate the entry and are
+ * picked up. The cached message maps are shared across calls and MUST be
+ * treated as immutable; all consumers copy before mutating
+ * (see mutateDirectLocale).
+ */
+interface CacheEntry {
+	mtimeMs: number;
+	size: number;
+	messages: LocaleMessages;
+}
+
+const fileCache = new Map<string, CacheEntry>();
+
+/**
+ * Resolves direct file access for the project, throwing a descriptive error
+ * when the project is not a supported message-format setup:
  *
  * - `plugin.inlang.messageFormat` settings with a single string `pathPattern`
- *   (a `pathPattern` array means multiple files per locale — SDK territory)
+ *   (a `pathPattern` array means multiple files per locale — unsupported)
  * - no other import/export plugin module configured that could take
  *   precedence (lint-rule modules are fine)
  *
- * Note this decides where message files *live*, not which path reads/writes
- * them — the `PARAGLIDE_MCP_FORCE_SDK` escape hatch is storage-selection
- * policy and lives in createStorage. Pass `settings` when the caller has
- * already parsed settings.json to avoid a second read.
+ * Pass `settings` when the caller has already parsed settings.json to avoid
+ * a second read.
  */
 export function parseDirectProject(
 	projectPath: string,
 	settings?: Record<string, unknown>
-): DirectProject | null {
+): DirectProject {
 	if (settings === undefined) {
+		const settingsPath = path.join(projectPath, "settings.json");
 		try {
 			settings = JSON.parse(
-				nodeFs.readFileSync(path.join(projectPath, "settings.json"), "utf8")
+				nodeFs.readFileSync(settingsPath, "utf8")
 			) as Record<string, unknown>;
-		} catch {
-			// unreadable settings: let the SDK produce its usual error
-			return null;
+		} catch (error) {
+			throw new Error(
+				`cannot read project settings at ${settingsPath}: ${(error as Error).message}`
+			);
 		}
 	}
 
@@ -62,7 +87,9 @@ export function parseDirectProject(
 		!Array.isArray(locales) ||
 		!locales.every((l) => typeof l === "string")
 	) {
-		return null;
+		throw new Error(
+			"invalid settings.json: baseLocale must be a string and locales an array of strings"
+		);
 	}
 
 	const pluginSettings = settings[MESSAGE_FORMAT_PLUGIN_KEY] as
@@ -70,17 +97,17 @@ export function parseDirectProject(
 		| undefined;
 	const pathPattern = pluginSettings?.pathPattern;
 	if (typeof pathPattern !== "string" || !pathPattern.includes("{locale}")) {
-		return null;
+		throw new Error(UNSUPPORTED_PROJECT);
 	}
 
-	// another plugin module could be the preferred import/export plugin —
-	// only the SDK can resolve that, so don't guess
+	// another plugin module would be the preferred import/export plugin —
+	// without the SDK that cannot be honored, so reject instead of guessing
 	const modules = (settings.modules ?? []) as string[];
 	const foreignPlugin = modules.some(
 		(m) => m.includes("plugin-") && !m.includes("plugin-message-format")
 	);
 	if (foreignPlugin) {
-		return null;
+		throw new Error(UNSUPPORTED_PROJECT);
 	}
 
 	const sort = pluginSettings?.sort;
@@ -90,7 +117,6 @@ export function parseDirectProject(
 	return {
 		baseLocale,
 		locales,
-		pluginKey: MESSAGE_FORMAT_PLUGIN_KEY,
 		...(sort === "asc" || sort === "desc" ? { sort } : {}),
 		fileFor: (locale: string) =>
 			path.resolve(root, pathPattern.replace("{locale}", locale)),
@@ -98,19 +124,37 @@ export function parseDirectProject(
 }
 
 /**
- * Reads all locale files and flattens them to `key -> value`, producing the
+ * Reads locale files and flattens them to `key -> value`, producing the
  * same snapshot shape as the SDK export path in service.ts. Missing locale
- * files count as empty (a locale freshly added to settings.json).
+ * files count as empty (a locale freshly added to settings.json). Pass
+ * `locales` to read a subset — per-locale operations (the translate loop)
+ * only need the base and target files, not every locale in the project.
  */
-export function readDirectSnapshot(project: DirectProject): MessagesSnapshot {
+export function readDirectSnapshot(
+	project: DirectProject,
+	locales: string[] = project.locales
+): MessagesSnapshot {
 	const snapshot: MessagesSnapshot = {};
-	for (const locale of project.locales) {
+	for (const locale of locales) {
 		snapshot[locale] = readLocaleFile(project.fileFor(locale));
 	}
 	return snapshot;
 }
 
 function readLocaleFile(filePath: string): LocaleMessages {
+	let stat: nodeFs.Stats;
+	try {
+		stat = nodeFs.statSync(filePath);
+	} catch {
+		// missing file counts as empty (a locale freshly added to settings)
+		fileCache.delete(filePath);
+		return {};
+	}
+	const cached = fileCache.get(filePath);
+	if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+		return cached.messages;
+	}
+
 	let raw: string;
 	try {
 		raw = nodeFs.readFileSync(filePath, "utf8");
@@ -127,7 +171,15 @@ function readLocaleFile(filePath: string): LocaleMessages {
 	}
 	delete json.$schema;
 	// safe: true keeps variant arrays intact
-	return flatten(json, { safe: true }) as LocaleMessages;
+	const messages = flatten(json, { safe: true }) as LocaleMessages;
+	// the stat was taken before the read: if the file changed in between, the
+	// stored mtime is older than the content and the next read re-parses
+	fileCache.set(filePath, {
+		mtimeMs: stat.mtimeMs,
+		size: stat.size,
+		messages,
+	});
+	return messages;
 }
 
 /** Reads one locale's message file, flattened to `key -> value`. */
@@ -199,6 +251,13 @@ function writeLocaleFile(
 		filePath,
 		JSON.stringify({ $schema: MESSAGE_FILE_SCHEMA, ...content }, null, "\t")
 	);
+	// write-through: the next read of this file is a cache hit
+	const stat = nodeFs.statSync(filePath);
+	fileCache.set(filePath, {
+		mtimeMs: stat.mtimeMs,
+		size: stat.size,
+		messages,
+	});
 }
 
 /** Recursive key sort, mirroring the plugin's sortMessageKeys/sortObjectKeys. */
