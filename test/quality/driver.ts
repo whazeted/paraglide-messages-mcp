@@ -236,7 +236,9 @@ export async function translateBatch(args: {
 		});
 		const response = await stream.finalMessage();
 		const text = response.content
-			.flatMap((block) => (block.type === "text" ? [block.text] : []))
+			.flatMap((block: { type: string; text?: string }) =>
+				block.type === "text" ? [block.text ?? ""] : []
+			)
 			.join("");
 		totalOutputTokens = response.usage.output_tokens;
 		const parsed = parseTranslationArray(text);
@@ -283,6 +285,8 @@ export async function callJudge(
 		messages: [{ role: "user", content: prompt }],
 	});
 	return response.content
-		.flatMap((block) => (block.type === "text" ? [block.text] : []))
+		.flatMap((block: { type: string; text?: string }) =>
+				block.type === "text" ? [block.text ?? ""] : []
+			)
 		.join("");
 }
