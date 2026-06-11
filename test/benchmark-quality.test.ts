@@ -11,6 +11,15 @@ import {
 	translateBatch,
 	TRANSLATOR_MODEL,
 } from "./quality/driver.js";
+import { buildCorpusProject, loadCorpus } from "./quality/corpus.js";
+import {
+	aggregate,
+	decayOnset,
+	parseJsonl,
+	renderMarkdownReport,
+	type MetricFn,
+	type RunRow,
+} from "./quality/report.js";
 
 /**
  * Instrumented translation sweep for measuring where LLM translation quality
@@ -19,15 +28,18 @@ import {
  * For each output-token budget the sweep runs the standard agent loop
  * (getTranslationBatch -> translateBatch -> saveTranslations) over fresh
  * projects for two target locales, and writes one JSONL row per translated
- * item to bench-results/<run-id>.jsonl. The judge/scoring pass runs offline
- * over those rows in a sibling module — this file only produces the data.
+ * item to bench-results/<run-id>.jsonl. The sweep then scores the rows with
+ * the Tier-1 mechanical metrics, writes bench-results/<stamp>-report.md, and
+ * prints the detected decay onset per budget — the token dropoff the run
+ * exists to find. The LLM judge (Tier 2/3) remains a separate, optional
+ * refinement pass over the same JSONL.
  *
  * Excluded from `pnpm test` by the existing `test/benchmark*.test.ts`
  * pattern; run via `pnpm bench:quality`. Without ANTHROPIC_API_KEY the whole
  * sweep is a deterministic offline dry-run that finishes in seconds.
  */
 
-/** 0 means "no budget" (whatever the service's default batching yields). */
+/** 0 disables the output budget entirely — the unbounded control arm. */
 const BUDGETS = [750, 1500, 3000, 6000, 0];
 
 const TARGET_LOCALES = ["de", "ja"];
@@ -57,41 +69,17 @@ interface BenchRow {
 }
 
 /**
- * The corpus fixture lands in a parallel PR and may not exist in this
- * checkout, so it is imported dynamically through a variable specifier
- * (which the type checker cannot resolve, and therefore cannot fail on).
- * Falls back to the deterministic large fixture when absent.
+ * The benchmark measures real prose, so the vendored corpus is the fixture.
+ * The synthetic large fixture only covers a checkout where the corpus data
+ * is missing — it keeps the dry-run pipeline testable, nothing more.
  */
-async function createProject(): Promise<FixtureProject> {
-	try {
-		const specifier = "./quality/corpus.js";
-		const corpus = (await import(specifier)) as Record<string, unknown>;
-		for (const factoryName of [
-			"createCorpusProject",
-			"createCorpusFixtureProject",
-		]) {
-			const factory = corpus[factoryName];
-			if (typeof factory === "function") {
-				const project = (await factory()) as FixtureProject;
-				if (project && typeof project.projectPath === "string") {
-					return project;
-				}
-			}
-		}
-	} catch {
-		// corpus module not present in this worktree — use the large fixture
+function createProject(): FixtureProject {
+	const corpus = loadCorpus();
+	if (corpus.length > 0) {
+		return buildCorpusProject(corpus, TARGET_LOCALES);
 	}
 	return createLargeFixtureProject({ messageCount: 120 });
 }
-
-/**
- * `maxOutputBudget` is added to getTranslationBatch by a parallel PR; this
- * widened arg type lets the sweep pass it without a compile-time dependency.
- * On a service without budget support the extra property is simply ignored.
- */
-type BudgetedBatchArgs = Parameters<
-	TranslationService["getTranslationBatch"]
->[0] & { maxOutputBudget?: number };
 
 async function sweepLocale(args: {
 	service: TranslationService;
@@ -103,11 +91,12 @@ async function sweepLocale(args: {
 	const { service, runId, budget, targetLocale, out } = args;
 	let rows = 0;
 	for (let batchIndex = 0; batchIndex < MAX_BATCHES_PER_LOCALE; batchIndex++) {
-		const batchArgs: BudgetedBatchArgs = {
+		// maxOutputBudget: 0 explicitly disables the budget — omitting it
+		// would silently apply the service default and duplicate that arm
+		const batch = service.getTranslationBatch({
 			targetLocale,
-			...(budget > 0 ? { maxOutputBudget: budget } : {}),
-		};
-		const batch = service.getTranslationBatch(batchArgs);
+			maxOutputBudget: budget,
+		});
 		if (batch.items.length === 0) break;
 
 		const translated = await translateBatch({
@@ -186,7 +175,7 @@ describe("benchmark: translation quality vs output budget", () => {
 				for (const targetLocale of TARGET_LOCALES) {
 					// fresh project per (budget, locale) so runs never see each
 					// other's saved translations
-					const fixture = await createProject();
+					const fixture = createProject();
 					try {
 						const service = new TranslationService(fixture.projectPath);
 						rows += await sweepLocale({
@@ -234,7 +223,82 @@ describe("benchmark: translation quality vs output budget", () => {
 				expect(typeof row.targetText).toBe("string");
 				expect(typeof row.sourceText).toBe("string");
 			}
+
+			// --- Tier-1 scoring + decay report: the answer the run exists for ---
+			const rows: RunRow[] = written.flatMap(
+				(filePath) => parseJsonl(fs.readFileSync(filePath, "utf8")).rows
+			);
+			const metrics = tier1Metrics(rows);
+			const aggregates = aggregate(rows, metrics);
+			const reportPath = path.join(RESULTS_DIR, `${stamp}-report.md`);
+			fs.writeFileSync(reportPath, renderMarkdownReport(aggregates));
+			// eslint-disable-next-line no-console
+			console.log(`[bench:quality] report -> ${reportPath}`);
+			for (const group of aggregates) {
+				for (const name of Object.keys(metrics)) {
+					const onset = decayOnset(group.tokenBandBuckets, name);
+					// eslint-disable-next-line no-console
+					console.log(
+						`[bench:quality] budget=${group.budget} locale=${group.targetLocale} ` +
+							`${name}: ${onset ? `decay onset at ~${onset.label} output tokens` : "no onset detected"}`
+					);
+				}
+			}
 		},
 		1_800_000
 	);
 });
+
+/**
+ * Tier-1 mechanical metric columns (higher is worse), built as closures over
+ * the full row set because the length metrics are relative to each locale's
+ * median target/source ratio — absolute ratios differ per language and would
+ * drown the positional signal.
+ */
+function tier1Metrics(rows: RunRow[]): Record<string, MetricFn> {
+	const ratiosByLocale = new Map<string, number[]>();
+	for (const row of rows) {
+		if (row.sourceText.length === 0 || row.targetText.length === 0) continue;
+		const ratios = ratiosByLocale.get(row.targetLocale) ?? [];
+		ratios.push(row.targetText.length / row.sourceText.length);
+		ratiosByLocale.set(row.targetLocale, ratios);
+	}
+	const medianByLocale = new Map<string, number>();
+	for (const [locale, ratios] of ratiosByLocale) {
+		const sorted = [...ratios].sort((a, b) => a - b);
+		const mid = Math.floor(sorted.length / 2);
+		medianByLocale.set(
+			locale,
+			sorted.length % 2 === 1
+				? sorted[mid]!
+				: (sorted[mid - 1]! + sorted[mid]!) / 2
+		);
+	}
+	const normalize = (text: string) =>
+		text.toLowerCase().replace(/\s+/g, " ").trim();
+
+	return {
+		failed: (row) => (row.validationStatus === "saved" ? 0 : 1),
+		copyThrough: (row) =>
+			row.sourceText.length > 0 &&
+			normalize(row.targetText) === normalize(row.sourceText)
+				? 1
+				: 0,
+		// terseness drift: how far an item falls below its locale's median
+		// expansion — the formulaic/summarizing signature of output decay
+		terseness: (row) => {
+			const median = medianByLocale.get(row.targetLocale);
+			if (
+				median === undefined ||
+				median === 0 ||
+				row.sourceText.length === 0 ||
+				row.targetText.length === 0
+			) {
+				return null;
+			}
+			const relative =
+				row.targetText.length / row.sourceText.length / median;
+			return Math.max(0, 1 - relative);
+		},
+	};
+}

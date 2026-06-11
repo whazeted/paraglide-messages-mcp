@@ -245,7 +245,7 @@ export function aggregate(
 	const tokenBandSize = options.tokenBandSize ?? 250;
 	const groups = new Map<string, { budget: number; locale: string; rows: RunRow[] }>();
 	for (const row of rows) {
-		const key = `${row.budget} ${row.targetLocale}`;
+		const key = `${row.budget}|${row.targetLocale}`;
 		const existing = groups.get(key);
 		if (existing === undefined) {
 			groups.set(key, { budget: row.budget, locale: row.targetLocale, rows: [row] });
