@@ -1,0 +1,79 @@
+{
+	"category": "medical",
+	"license": "Public domain (US government work)",
+	"attribution": "MedlinePlus (National Library of Medicine) patient-facing health pages; per-paragraph attribution includes page title and last reviewed/updated date",
+	"sourceUrl": "https://medlineplus.gov/",
+	"retrieved": "2026-06-11",
+	"paragraphs": [
+		{
+			"id": "medical_medlineplus_001",
+			"chars": 359,
+			"text": "Blood pressure is the force of your blood pushing against the walls of your arteries. Each time your heart beats, it pumps blood into the arteries. Your blood pressure is highest when your heart beats, pumping the blood. This is called systolic pressure. When your heart is at rest, between beats, your blood pressure falls. This is called diastolic pressure.",
+			"attribution": "MedlinePlus, 'High Blood Pressure', last updated January 22, 2026",
+			"sourceUrl": "https://medlineplus.gov/highbloodpressure.html"
+		},
+		{
+			"id": "medical_medlineplus_002",
+			"chars": 342,
+			"text": "High blood pressure usually has no symptoms. So the only way to find out if you have it is to get regular blood pressure checks from your health care provider. Your provider will use a gauge, a stethoscope or electronic sensor, and a blood pressure cuff. They will take two or more readings at separate appointments before making a diagnosis.",
+			"attribution": "MedlinePlus, 'High Blood Pressure', last updated January 22, 2026",
+			"sourceUrl": "https://medlineplus.gov/highbloodpressure.html"
+		},
+		{
+			"id": "medical_medlineplus_003",
+			"chars": 413,
+			"text": "Type 2 diabetes is a disease in which your blood glucose, or blood sugar, levels are too high. Glucose is your main source of energy. It comes from the foods you eat. A hormone called insulin helps the glucose get into your cells to give them energy. If you have diabetes, your body doesn't make enough insulin or doesn't use insulin well. The glucose then stays in your blood and not enough goes into your cells.",
+			"attribution": "MedlinePlus, 'Diabetes Type 2', last updated January 21, 2026",
+			"sourceUrl": "https://medlineplus.gov/diabetestype2.html"
+		},
+		{
+			"id": "medical_medlineplus_004",
+			"chars": 369,
+			"text": "Type 2 diabetes usually starts with insulin resistance. This is a condition in which your cells don't respond normally to insulin. As a result, your body needs more insulin to help the glucose enter your cells. At first, your body makes more insulin to try to get cells to respond. But over time, your body can't make enough insulin, and your blood glucose levels rise.",
+			"attribution": "MedlinePlus, 'Diabetes Type 2', last updated January 21, 2026",
+			"sourceUrl": "https://medlineplus.gov/diabetestype2.html"
+		},
+		{
+			"id": "medical_medlineplus_005",
+			"chars": 493,
+			"text": "Depression is more than a feeling of being sad or irritable for a few days. It's a serious mood disorder. As one of the most common mental disorders in the United States, depression can affect how you think, feel, and your everyday life. You may not know why you feel this way, but even basic daily activities such as sleeping, eating, or working may become difficult. Depression often needs long-term treatment but getting help at the earliest sign of a problem can help manage your symptoms.",
+			"attribution": "MedlinePlus, 'Depression', last updated June 30, 2025",
+			"sourceUrl": "https://medlineplus.gov/depression.html"
+		},
+		{
+			"id": "medical_medlineplus_006",
+			"chars": 537,
+			"text": "There are a variety of things that may cause depression, including genetic, biological, environmental, and psychological factors. Depression can happen at any age and can affect anyone, but it's more common in women. This is often due to the physical and hormonal changes that women have during menstruation, pregnancy, the postpartum period, and menopause. Other mental disorders or chronic medical conditions such as diabetes, cancer, or heart disease may occur with depression. This may make the chronic condition or depression worse.",
+			"attribution": "MedlinePlus, 'Depression', last updated June 30, 2025",
+			"sourceUrl": "https://medlineplus.gov/depression.html"
+		},
+		{
+			"id": "medical_medlineplus_007",
+			"chars": 720,
+			"text": "Semaglutide injection may increase the risk that you will develop thyroid gland tumors, including a type of thyroid cancer. Semaglutide injection caused thyroid tumors in rats. It is not known if this medication increases the risk of tumors in humans. Tell your doctor if you or anyone in your family has or has ever had thyroid tumors, thyroid cancer, or Multiple Endocrine Neoplasia syndrome type 2 (MEN 2; condition that causes tumors in more than one gland in the body). If so, your doctor will probably tell you not to use semaglutide injection. If you experience any of the following symptoms, call your doctor immediately: a lump or swelling in the neck; hoarseness; difficulty swallowing; or shortness of breath.",
+			"attribution": "MedlinePlus Drug Information, 'Semaglutide Injection', last revised May 15, 2026",
+			"sourceUrl": "https://medlineplus.gov/druginfo/meds/a618008.html"
+		},
+		{
+			"id": "medical_medlineplus_008",
+			"chars": 495,
+			"text": "Semaglutide injection is in a class of medications called incretin mimetics. It works to manage diabetes by helping the pancreas to release the right amount of insulin when blood sugar levels are high. Insulin helps move sugar from the blood into other body tissues where it is used for energy. Semaglutide injection also slows the emptying of the stomach and may decrease appetite and cause weight loss. Semaglutide injection works in several ways to improve liver function in people with MASH.",
+			"attribution": "MedlinePlus Drug Information, 'Semaglutide Injection', last revised May 15, 2026",
+			"sourceUrl": "https://medlineplus.gov/druginfo/meds/a618008.html"
+		},
+		{
+			"id": "medical_medlineplus_009",
+			"chars": 1204,
+			"text": "Fentanyl may be habit forming, especially with prolonged use. Use fentanyl exactly as directed. Do not use a larger dose of fentanyl, use the medication more often, or use it for a longer period of time than prescribed by your doctor. While using fentanyl, discuss with your health care provider your pain treatment goals, length of treatment, and other ways to manage your pain. Tell your doctor if you or anyone in your family drinks or has ever drunk large amounts of alcohol, uses or has ever used street drugs, or has overused prescription medications, or has had an overdose, or if you have or have ever had mental problems such as depression, schizophrenia (a mental illness that causes disturbed or unusual thinking, loss of interest in life, and strong or inappropriate emotions), or hallucinations (seeing things or hearing voices that do not exist). There is a greater risk that you will overuse fentanyl if you have or have ever had any of these conditions. Talk to your health care provider immediately and ask for guidance if you think that you have an opioid addiction or call the U.S. Substance Abuse and Mental Health Services Administration (SAMHSA) National Helpline at 1-800-662-HELP.",
+			"attribution": "MedlinePlus Drug Information, 'Fentanyl', last revised September 15, 2025",
+			"sourceUrl": "https://medlineplus.gov/druginfo/meds/a605043.html"
+		},
+		{
+			"id": "medical_medlineplus_010",
+			"chars": 1363,
+			"text": "While using fentanyl, you should talk to your doctor about having a rescue medication called naloxone readily available (e.g., home, office). Naloxone is used to reverse the life-threatening effects of an overdose. It works by blocking the effects of opiates to relieve dangerous symptoms caused by high levels of opiates in the blood. Your doctor may also prescribe you naloxone if you are living in a household where there are small children or someone who has abused street or prescription drugs. You should make sure that you and your family members, caregivers, or the people who spend time with you know how to tell recognize an overdose, how to use naloxone, and what to do until emergency medical help arrives. Your doctor or pharmacist will show you and your family members how to use the medication. Ask your pharmacist for the instructions or visit the manufacturer's website to get the instructions. If symptoms of an overdose occur, a friend or family member should give the first dose of naloxone, call 911 immediately, and stay with you and watch you closely until emergency medical help arrives. Your symptoms may return within a few minutes after you receive naloxone. If your symptoms return, the person should give you another dose of naloxone. Additional doses may be given every 2 to 3 minutes, if symptoms return before medical help arrives.",
+			"attribution": "MedlinePlus Drug Information, 'Fentanyl', last revised September 15, 2025",
+			"sourceUrl": "https://medlineplus.gov/druginfo/meds/a605043.html"
+		}
+	]
+}
