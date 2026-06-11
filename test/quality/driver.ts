@@ -1,5 +1,8 @@
+import { estimateTokens } from "../../src/core/budget.js";
 import type { MessageValue } from "../../src/core/types.js";
 import { pseudoTranslate } from "../large-fixture.js";
+
+export { estimateTokens };
 
 /**
  * LLM call layer for the translation-quality benchmark.
@@ -74,16 +77,6 @@ export const DRY_RUN_JUDGE_STUB =
  */
 export function isDryRun(spec: string = TRANSLATOR_MODEL): boolean {
 	return !hasKeyFor(parseModelSpec(spec).provider);
-}
-
-/**
- * Local mirrors of src/core/budget.ts (landing in a sibling PR of this
- * benchmark effort). Kept here so this unit compiles and runs standalone;
- * once budget.ts is merged these can be swapped for direct imports. The
- * 4-chars-per-token heuristic matches the budget module's estimator.
- */
-export function estimateTokens(text: string): number {
-	return Math.ceil(text.length / 4);
 }
 
 /** Plain-text projection of a message value (variant matches joined). */
@@ -286,10 +279,12 @@ export async function translateBatch(args: {
 		);
 		// Synthesize the "call total" from the same estimator used for the
 		// per-item weights, so dry-run rows are internally consistent.
-		totalOutputTokens = args.items.reduce(
-			(sum, item) =>
-				sum + estimateTokens(textOf(values.get(item.key) ?? item.source)),
-			0
+		totalOutputTokens = Math.round(
+			args.items.reduce(
+				(sum, item) =>
+					sum + estimateTokens(textOf(values.get(item.key) ?? item.source)),
+				0
+			)
 		);
 	} else {
 		dryRun = false;

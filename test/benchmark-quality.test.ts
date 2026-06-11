@@ -16,10 +16,18 @@ import {
 	TRANSLATOR_MODEL,
 } from "./quality/driver.js";
 import {
+	anchorRecall,
 	buildMqmPrompt,
+	buildPairwisePrompt,
 	crossJudgeAgreement,
 	mqmScore,
+	pairwiseWinRates,
 	parseMqmResponse,
+	parsePairwiseResponse,
+	plantAnchors,
+	selfConsistency,
+	type PairwiseVerdict,
+	type QualityItem,
 } from "./quality/judge.js";
 import { buildCorpusProject, loadCorpus } from "./quality/corpus.js";
 import {
@@ -27,9 +35,19 @@ import {
 	decayOnset,
 	parseJsonl,
 	renderMarkdownReport,
-	type MetricFn,
 	type RunRow,
 } from "./quality/report.js";
+import {
+	buildTier1Metrics,
+	collectMetricOnsets,
+	evaluateGates,
+	recommendDefault,
+	type AnchorGateInput,
+	type CrossJudgeGateInput,
+	type GateEvaluation,
+	type PairwiseGateInput,
+	type SelfConsistencyGateInput,
+} from "./quality/calibration.js";
 
 /**
  * Instrumented translation sweep for measuring where LLM translation quality
@@ -38,11 +56,10 @@ import {
  * For each output-token budget the sweep runs the standard agent loop
  * (getTranslationBatch -> translateBatch -> saveTranslations) over fresh
  * projects for two target locales, and writes one JSONL row per translated
- * item to bench-results/<run-id>.jsonl. The sweep then scores the rows with
- * the Tier-1 mechanical metrics, writes bench-results/<stamp>-report.md, and
- * prints the detected decay onset per budget — the token dropoff the run
- * exists to find. The LLM judge (Tier 2/3) remains a separate, optional
- * refinement pass over the same JSONL.
+ * item to test/quality/reports/<run-id>.jsonl. The sweep then scores the rows
+ * with mechanical metrics and reliability-gated LLM judges, writes
+ * test/quality/reports/<stamp>-report.md, and prints the detected decay onset
+ * per budget — the token dropoff the run exists to find.
  *
  * Excluded from `pnpm test` by the existing `test/benchmark*.test.ts`
  * pattern; run via `pnpm bench:quality`. Without ANTHROPIC_API_KEY the whole
@@ -67,10 +84,16 @@ const JUDGE_SAMPLE = Math.max(
 /** Concurrent judge calls; small to stay friendly to both providers. */
 const JUDGE_CONCURRENCY = 8;
 
+/** Source rows used for anchor and repeat-judgment reliability checks. */
+const RELIABILITY_SAMPLE = 20;
+
+/** Head/tail pairs per budget × locale group for blind pairwise judging. */
+const PAIRWISE_PAIRS_PER_GROUP = 4;
+
 /** Hard stop so a save that never makes progress cannot loop forever. */
 const MAX_BATCHES_PER_LOCALE = 500;
 
-const RESULTS_DIR = path.resolve(process.cwd(), "bench-results");
+const RESULTS_DIR = path.resolve(process.cwd(), "test/quality/reports");
 
 interface BenchRow {
 	runId: string;
@@ -251,21 +274,39 @@ describe("benchmark: translation quality vs output budget", () => {
 			const rows: RunRow[] = written.flatMap(
 				(filePath) => parseJsonl(fs.readFileSync(filePath, "utf8")).rows
 			);
-			const metrics = tier1Metrics(rows);
+			const metrics = buildTier1Metrics(rows);
 
 			// --- Tier-2: MQM judge pass over a stratified sample, one column
 			// per configured judge model (cross-provider judges supported) ---
 			const judgeRun = await judgeSampledRows(rows);
-			for (const [spec, scores] of judgeRun.scoresByJudge) {
-				metrics[`mqm(${spec})`] = (row) => scores.get(rowId(row)) ?? null;
+			const gateEvaluation = evaluateGates({
+				activeJudgeCount: judgeRun.activeJudges.length,
+				anchorResults: judgeRun.anchorResults,
+				selfConsistencyResults: judgeRun.selfConsistencyResults,
+				crossJudgeAgreements: judgeRun.agreements,
+				pairwiseResults: judgeRun.pairwiseResults,
+			});
+			if (gateEvaluation.admissible) {
+				for (const [spec, scores] of judgeRun.scoresByJudge) {
+					metrics[`mqm(${spec})`] = (row) => scores.get(rowId(row)) ?? null;
+				}
 			}
 
 			const aggregates = aggregate(rows, metrics);
+			const metricOnsets = collectMetricOnsets(aggregates, Object.keys(metrics));
+			const recommendation = recommendDefault({
+				model: TRANSLATOR_MODEL,
+				admissible: gateEvaluation.admissible,
+				metricOnsets,
+				budgets: BUDGETS,
+			});
 			const reportPath = path.join(RESULTS_DIR, `${stamp}-report.md`);
 			const metadata = renderRunMetadata({
 				stamp,
 				rows: rows.length,
 				judgeRun,
+				gateEvaluation,
+				recommendation,
 			});
 			fs.writeFileSync(
 				reportPath,
@@ -273,7 +314,11 @@ describe("benchmark: translation quality vs output budget", () => {
 			);
 			fs.writeFileSync(
 				path.join(RESULTS_DIR, `${stamp}-config.json`),
-				`${JSON.stringify(runConfig(stamp, judgeRun), null, "\t")}\n`
+				`${JSON.stringify(
+					runConfig(stamp, judgeRun, gateEvaluation, metricOnsets, recommendation),
+					null,
+					"\t"
+				)}\n`
 			);
 			// eslint-disable-next-line no-console
 			console.log(`[bench:quality] report -> ${reportPath}`);
@@ -292,73 +337,23 @@ describe("benchmark: translation quality vs output budget", () => {
 	);
 });
 
-/**
- * Tier-1 mechanical metric columns (higher is worse), built as closures over
- * the full row set because the length metrics are relative to each locale's
- * median target/source ratio — absolute ratios differ per language and would
- * drown the positional signal.
- */
-function tier1Metrics(rows: RunRow[]): Record<string, MetricFn> {
-	const ratiosByLocale = new Map<string, number[]>();
-	for (const row of rows) {
-		if (row.sourceText.length === 0 || row.targetText.length === 0) continue;
-		const ratios = ratiosByLocale.get(row.targetLocale) ?? [];
-		ratios.push(row.targetText.length / row.sourceText.length);
-		ratiosByLocale.set(row.targetLocale, ratios);
-	}
-	const medianByLocale = new Map<string, number>();
-	for (const [locale, ratios] of ratiosByLocale) {
-		const sorted = [...ratios].sort((a, b) => a - b);
-		const mid = Math.floor(sorted.length / 2);
-		medianByLocale.set(
-			locale,
-			sorted.length % 2 === 1
-				? sorted[mid]!
-				: (sorted[mid - 1]! + sorted[mid]!) / 2
-		);
-	}
-	const normalize = (text: string) =>
-		text.toLowerCase().replace(/\s+/g, " ").trim();
-
-	return {
-		failed: (row) => (row.validationStatus === "saved" ? 0 : 1),
-		copyThrough: (row) =>
-			row.sourceText.length > 0 &&
-			normalize(row.targetText) === normalize(row.sourceText)
-				? 1
-				: 0,
-		// terseness drift: how far an item falls below its locale's median
-		// expansion — the formulaic/summarizing signature of output decay
-		terseness: (row) => {
-			const median = medianByLocale.get(row.targetLocale);
-			if (
-				median === undefined ||
-				median === 0 ||
-				row.sourceText.length === 0 ||
-				row.targetText.length === 0
-			) {
-				return null;
-			}
-			const relative =
-				row.targetText.length / row.sourceText.length / median;
-			return Math.max(0, 1 - relative);
-		},
-	};
-}
-
 /** Stable row identity for joining judge scores back onto rows. */
 function rowId(row: RunRow): string {
 	return `${row.runId}|${row.targetLocale}|${row.key}`;
 }
 
 interface JudgeRunResult {
+	activeJudges: string[];
 	/** judge spec -> rowId -> severity-weighted MQM errors per 100 words. */
 	scoresByJudge: Map<string, Map<string, number>>;
 	/** Configured judges whose provider key is absent (documented, not run). */
 	skippedJudges: string[];
 	sampledRowCount: number;
 	/** Pairwise agreement between judges on coarse verdict labels. */
-	agreements: Array<{ judges: [string, string]; agreement: number; kappa: number }>;
+	agreements: CrossJudgeGateInput[];
+	anchorResults: AnchorGateInput[];
+	selfConsistencyResults: SelfConsistencyGateInput[];
+	pairwiseResults: PairwiseGateInput[];
 }
 
 /**
@@ -379,31 +374,18 @@ async function judgeSampledRows(rows: RunRow[]): Promise<JudgeRunResult> {
 	);
 	if (activeJudges.length === 0 || JUDGE_SAMPLE === 0) {
 		return {
+			activeJudges,
 			scoresByJudge: new Map(),
 			skippedJudges,
 			sampledRowCount: 0,
 			agreements: [],
+			anchorResults: [],
+			selfConsistencyResults: [],
+			pairwiseResults: [],
 		};
 	}
 
-	const groups = new Map<string, RunRow[]>();
-	for (const row of rows) {
-		const key = `${row.budget}|${row.targetLocale}`;
-		(groups.get(key) ?? groups.set(key, []).get(key)!).push(row);
-	}
-	const sampled: RunRow[] = [];
-	for (const group of groups.values()) {
-		const sorted = [...group].sort(
-			(a, b) =>
-				a.cumulativeOutputTokensAtEmission - b.cumulativeOutputTokensAtEmission
-		);
-		const take = Math.min(JUDGE_SAMPLE, sorted.length);
-		const picked = new Set<number>();
-		for (let i = 0; i < take; i++) {
-			picked.add(Math.floor((i * (sorted.length - 1)) / Math.max(1, take - 1)));
-		}
-		for (const index of picked) sampled.push(sorted[index]!);
-	}
+	const sampled = sampleRowsByBudgetLocale(rows, JUDGE_SAMPLE);
 
 	const scoresByJudge = new Map<string, Map<string, number>>();
 	const labelsByJudge = new Map<string, Map<string, string>>();
@@ -459,11 +441,27 @@ async function judgeSampledRows(rows: RunRow[]): Promise<JudgeRunResult> {
 		}
 	}
 
+	const reliabilityRows = pickEvenly(
+		[...sampled].sort((a, b) => rowId(a).localeCompare(rowId(b))),
+		Math.min(RELIABILITY_SAMPLE, sampled.length)
+	);
+	const anchorResults = await judgeAnchors(activeJudges, reliabilityRows);
+	const selfConsistencyResults = await judgeSelfConsistency(
+		activeJudges,
+		reliabilityRows,
+		labelsByJudge
+	);
+	const pairwiseResults = await judgePairwise(activeJudges, rows);
+
 	return {
+		activeJudges,
 		scoresByJudge,
 		skippedJudges,
 		sampledRowCount: sampled.length,
 		agreements,
+		anchorResults,
+		selfConsistencyResults,
+		pairwiseResults,
 	};
 }
 
@@ -475,19 +473,209 @@ function verdictLabel(severities: string[]): string {
 	return "clean";
 }
 
-function runConfig(stamp: string, judgeRun: JudgeRunResult) {
+function sampleRowsByBudgetLocale(rows: RunRow[], samplePerGroup: number): RunRow[] {
+	const groups = new Map<string, RunRow[]>();
+	for (const row of rows) {
+		const key = `${row.budget}|${row.targetLocale}`;
+		(groups.get(key) ?? groups.set(key, []).get(key)!).push(row);
+	}
+	const sampled: RunRow[] = [];
+	for (const group of groups.values()) {
+		const sorted = [...group].sort(
+			(a, b) =>
+				a.cumulativeOutputTokensAtEmission - b.cumulativeOutputTokensAtEmission
+		);
+		sampled.push(...pickEvenly(sorted, Math.min(samplePerGroup, sorted.length)));
+	}
+	return sampled;
+}
+
+function pickEvenly<T>(items: T[], take: number): T[] {
+	if (take <= 0 || items.length === 0) return [];
+	if (take >= items.length) return [...items];
+	const picked = new Set<number>();
+	for (let i = 0; i < take; i++) {
+		picked.add(Math.floor((i * (items.length - 1)) / Math.max(1, take - 1)));
+	}
+	return [...picked].sort((a, b) => a - b).map((index) => items[index]!);
+}
+
+function toQualityItem(row: RunRow): QualityItem {
+	return {
+		key: row.key,
+		positionInBatch: row.positionInBatch,
+		batchItemCount: row.batchItemCount,
+		sourceText: row.sourceText,
+		targetText: row.targetText,
+		targetLocale: row.targetLocale,
+		sourceChars: row.sourceChars,
+	};
+}
+
+async function judgeAnchors(
+	activeJudges: string[],
+	reliabilityRows: RunRow[]
+): Promise<AnchorGateInput[]> {
+	const anchors = plantAnchors(reliabilityRows.map(toQualityItem), 13_371);
+	const results: AnchorGateInput[] = [];
+	for (const spec of activeJudges) {
+		const judged: Array<{
+			expected: (typeof anchors)[number]["expected"];
+			flaggedCategories: ReturnType<typeof parseMqmResponse>[number]["category"][];
+		}> = [];
+		for (let i = 0; i < anchors.length; i += JUDGE_CONCURRENCY) {
+			const chunk = anchors.slice(i, i + JUDGE_CONCURRENCY);
+			await Promise.all(
+				chunk.map(async (anchor) => {
+					try {
+						const errors = parseMqmResponse(
+							await callJudge(buildMqmPrompt(anchor), spec)
+						);
+						judged.push({
+							expected: anchor.expected,
+							flaggedCategories: errors.map((error) => error.category),
+						});
+					} catch {
+						judged.push({
+							expected: anchor.expected,
+							flaggedCategories: [],
+						});
+					}
+				})
+			);
+		}
+		const result = anchorRecall(judged);
+		results.push({
+			judge: spec,
+			recall: result.recall,
+			goodFalseAlarmRate: result.goodFalseAlarmRate,
+			defectCount: result.defectCount,
+		});
+	}
+	return results;
+}
+
+async function judgeSelfConsistency(
+	activeJudges: string[],
+	reliabilityRows: RunRow[],
+	labelsByJudge: Map<string, Map<string, string>>
+): Promise<SelfConsistencyGateInput[]> {
+	const results: SelfConsistencyGateInput[] = [];
+	for (const spec of activeJudges) {
+		const originalLabels = labelsByJudge.get(spec) ?? new Map<string, string>();
+		const pairs: Array<readonly [string, string]> = [];
+		for (let i = 0; i < reliabilityRows.length; i += JUDGE_CONCURRENCY) {
+			const chunk = reliabilityRows.slice(i, i + JUDGE_CONCURRENCY);
+			await Promise.all(
+				chunk.map(async (row) => {
+					const first = originalLabels.get(rowId(row));
+					if (first === undefined) return;
+					try {
+						const errors = parseMqmResponse(
+							await callJudge(buildMqmPrompt(toQualityItem(row)), spec)
+						);
+						pairs.push([first, verdictLabel(errors.map((e) => e.severity))]);
+					} catch {
+						// Unparseable repeats are skipped and reflected in sampleCount.
+					}
+				})
+			);
+		}
+		results.push({
+			judge: spec,
+			score: selfConsistency(pairs),
+			sampleCount: pairs.length,
+		});
+	}
+	return results;
+}
+
+async function judgePairwise(
+	activeJudges: string[],
+	rows: RunRow[]
+): Promise<PairwiseGateInput[]> {
+	const pairs = buildPairwiseRows(rows);
+	const results: PairwiseGateInput[] = [];
+	for (const spec of activeJudges) {
+		const verdicts: PairwiseVerdict[] = [];
+		for (let i = 0; i < pairs.length; i += JUDGE_CONCURRENCY) {
+			const chunk = pairs.slice(i, i + JUDGE_CONCURRENCY);
+			await Promise.all(
+				chunk.map(async ({ head, tail, seed }) => {
+					const built = buildPairwisePrompt(
+						toQualityItem(head),
+						toQualityItem(tail),
+						seed
+					);
+					try {
+						verdicts.push({
+							verdict: parsePairwiseResponse(await callJudge(built.prompt, spec)),
+							swapped: built.swapped,
+						});
+					} catch {
+						// A malformed pairwise response loses one pair, not the run.
+					}
+				})
+			);
+		}
+		results.push({ judge: spec, ...pairwiseWinRates(verdicts) });
+	}
+	return results;
+}
+
+function buildPairwiseRows(
+	rows: RunRow[]
+): Array<{ head: RunRow; tail: RunRow; seed: number }> {
+	const groups = new Map<string, RunRow[]>();
+	for (const row of rows) {
+		const key = `${row.budget}|${row.targetLocale}`;
+		(groups.get(key) ?? groups.set(key, []).get(key)!).push(row);
+	}
+	const pairs: Array<{ head: RunRow; tail: RunRow; seed: number }> = [];
+	let seed = 91_001;
+	for (const group of groups.values()) {
+		const sorted = [...group].sort(
+			(a, b) =>
+				a.cumulativeOutputTokensAtEmission - b.cumulativeOutputTokensAtEmission
+		);
+		const take = Math.min(PAIRWISE_PAIRS_PER_GROUP, Math.floor(sorted.length / 2));
+		for (let i = 0; i < take; i++) {
+			pairs.push({
+				head: sorted[i]!,
+				tail: sorted[sorted.length - 1 - i]!,
+				seed: seed++,
+			});
+		}
+	}
+	return pairs;
+}
+
+function runConfig(
+	stamp: string,
+	judgeRun: JudgeRunResult,
+	gateEvaluation: GateEvaluation,
+	metricOnsets: ReturnType<typeof collectMetricOnsets>,
+	recommendation: ReturnType<typeof recommendDefault>
+) {
 	return {
 		generated: stamp,
 		mode: isDryRun() ? "dry-run" : "live",
 		translatorModel: TRANSLATOR_MODEL,
 		judgeModels: JUDGE_MODELS,
-		activeJudges: [...judgeRun.scoresByJudge.keys()],
+		activeJudges: judgeRun.activeJudges,
 		skippedJudges: judgeRun.skippedJudges,
 		judgeSamplePerGroup: JUDGE_SAMPLE,
 		judgedRows: judgeRun.sampledRowCount,
 		budgets: BUDGETS,
 		targetLocales: TARGET_LOCALES,
 		crossJudgeAgreement: judgeRun.agreements,
+		anchorRecall: judgeRun.anchorResults,
+		selfConsistency: judgeRun.selfConsistencyResults,
+		pairwise: judgeRun.pairwiseResults,
+		admissible: gateEvaluation.admissible,
+		gates: gateEvaluation.gates,
+		metricOnsets,
+		recommendedDefaultByModel: recommendation,
 	};
 }
 
@@ -499,8 +687,10 @@ function renderRunMetadata(args: {
 	stamp: string;
 	rows: number;
 	judgeRun: JudgeRunResult;
+	gateEvaluation: GateEvaluation;
+	recommendation: ReturnType<typeof recommendDefault>;
 }): string {
-	const { judgeRun } = args;
+	const { gateEvaluation, judgeRun, recommendation } = args;
 	const lines = [
 		"## Run metadata",
 		"",
@@ -518,7 +708,16 @@ function renderRunMetadata(args: {
 		`- budgets swept: ${BUDGETS.join(", ")} (0 = budget disabled)`,
 		`- target locales: ${TARGET_LOCALES.join(", ")}`,
 		`- rows: ${args.rows}`,
+		`- admissible: ${gateEvaluation.admissible}`,
+		`- recommended default: ${
+			recommendation.recommendedDefault === null
+				? `none (${recommendation.reason})`
+				: `${recommendation.recommendedDefault} output tokens`
+		}`,
 	];
+	for (const [name, gate] of Object.entries(gateEvaluation.gates)) {
+		lines.push(`- gate ${name}: ${gate.status} — ${gate.detail}`);
+	}
 	for (const { judges, agreement, kappa } of judgeRun.agreements) {
 		lines.push(
 			`- cross-judge agreement ${judges[0]} vs ${judges[1]}: ` +

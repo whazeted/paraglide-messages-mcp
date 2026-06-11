@@ -187,10 +187,11 @@ describe("callJudge (dry-run)", () => {
 });
 
 describe("estimateTokens / textOf", () => {
-	it("estimates ~4 chars per token, rounding up", () => {
+	it("uses the production script-aware token estimator", () => {
 		expect(estimateTokens("")).toBe(0);
 		expect(estimateTokens("abcd")).toBe(1);
-		expect(estimateTokens("abcde")).toBe(2);
+		expect(estimateTokens("abcde")).toBe(1.25);
+		expect(estimateTokens("日本語")).toBeCloseTo(2.4);
 	});
 
 	it("projects complex messages to their variant texts", () => {
