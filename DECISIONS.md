@@ -161,3 +161,30 @@ numbers drift from the constants and read as rules. They now state the
 direction and its effect instead: raising the batch size means fewer
 round-trips (short UI strings); lowering it gives each item more of the
 agent's attention (long, nuanced prose).
+
+## 15. Empirical calibration method for the output-token budget
+
+**2026-06-11 · active · extends 14**
+
+`DEFAULT_OUTPUT_TOKEN_BUDGET = 1500` is anchored to external research on
+long-output degradation (LongProc, LongWriter, document-level MT), not to
+measurements of this system translating this kind of content. Like every
+number in this log, it is policy — and policy anchored to someone else's
+experiments on someone else's models goes stale silently with each model
+generation. Rather than treat 1500 as permanent, the repo now carries a
+reproducible way to re-derive it: a vendored 10-category corpus
+(recency-filtered, partly original works), an instrumented budget sweep
+that logs one JSONL row per translated item, tiered metrics (mechanical
+checks, an MQM judge scoring over-verbosity/over-compression, blind
+head-vs-tail pairwise), and an analysis layer that detects the decay onset
+per budget — the first position/token bucket whose scores leave the head
+buckets' noise floor (see [test/quality/](test/quality/) and the
+calibration section of [PERFORMANCE.md](PERFORMANCE.md)).
+
+The cost is carried weight: corpus files, a judge whose own reliability has
+to be gated (anchor recall, self-consistency, cross-judge kappa, position
+bias), and a paid run per model generation. The measurement is deliberately
+relative — decay across output positions — because memorized corpus text
+does not vary by position, so contamination cancels out of the comparison
+even though it can never be ruled out. No measured numbers exist yet; the
+default stays 1500 until the first paid sweep says otherwise.

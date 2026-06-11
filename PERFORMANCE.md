@@ -299,3 +299,82 @@ target-file writes themselves (unflatten + serialize + write of files
 growing to ~600 KB) — reads are effectively free now, so the full
 translation pipeline is bounded by the agent's own translation speed plus
 the cost of physically writing the results.
+
+## Output-token budget calibration (method)
+
+Everything above measures the *server*; this section is about the *agent*.
+`DEFAULT_OUTPUT_TOKEN_BUDGET` in
+[src/core/constants.ts](src/core/constants.ts) (currently 1500) caps how
+many output tokens a translation batch should target before quality is
+assumed to degrade. That number is anchored to external research on
+long-output LLM degradation — LongProc ([arXiv:2501.05414](https://arxiv.org/abs/2501.05414)),
+LongWriter ([arXiv:2408.07055](https://arxiv.org/abs/2408.07055)), and
+document-level MT studies ([arXiv:2401.08088](https://arxiv.org/abs/2401.08088)) —
+not to measurements on this system. The benchmark under
+[test/quality/](test/quality/) exists to replace that borrowed anchor with
+a measured one.
+
+### How to run
+
+```
+ANTHROPIC_API_KEY=... pnpm bench:quality
+```
+
+Without an API key the harness performs a dry run (corpus loading, batch
+construction, JSONL plumbing, analysis) with no model calls. The models are
+env-overridable: `BENCH_TRANSLATOR_MODEL` (default `claude-sonnet-4-6`)
+does the translating, `BENCH_JUDGE_MODEL` (default `claude-opus-4-8`) does
+the judging — deliberately different models, so the judge has no
+self-preference toward output it might itself have produced.
+
+### The corpus
+
+[test/quality/corpus/](test/quality/corpus/) holds 10 categories × 10
+paragraphs of source prose, all open-licensed or authored for this repo,
+under a recency rule: fetched text must postdate 2025-06 so it falls after
+plausible training cutoffs. Categories span the message shapes the server
+actually sees, from terse UI strings to long narrative paragraphs.
+
+### Metric tiers
+
+- **Tier 1 — mechanical** ([test/quality/metrics.ts](test/quality/metrics.ts)):
+  deterministic per-item checks (length ratios, placeholder/markup survival,
+  copy-through and repetition detection). Free, runs on every row.
+- **Tier 2 — MQM judge**: an LLM judge produces MQM-style error counts per
+  item, including over-verbosity and over-compression — the two failure
+  modes length pressure produces that mechanical checks see only as a
+  length ratio.
+- **Tier 3 — blind pairwise**: head items vs. tail items from the same run,
+  source order shuffled and labels hidden, judged head-to-head.
+
+### Judge reliability gates
+
+Tier 2 and 3 scores only count when the judge passes its gates: recall on
+planted anchor errors, self-consistency across repeated judgments of the
+same item, cross-judge agreement (kappa), and A/B position bias ≈ 50% in
+the pairwise tier. A judge that fails its gates invalidates the run rather
+than quietly skewing it.
+
+### Analysis
+
+[test/quality/report.ts](test/quality/report.ts) parses the runner's JSONL
+(one row per translated item; malformed lines are collected, never fatal),
+groups rows by budget × locale, and buckets them by position-in-batch and
+by cumulative-output-token band. For each budget it detects the **decay
+onset**: the first bucket whose metric mean leaves the head buckets' noise
+floor (head mean + 2× head stddev). The calibrated default is then the
+largest budget whose sweep shows no onset — measured, not borrowed.
+
+### Caveats
+
+The honest limits of this method: corpus text fetched from the web is
+recency-filtered and four categories are original works written for this
+repo, but crawled text can never be *guaranteed* uncontaminated — a model
+may have memorized some source passage anyway. That is why the measurement
+is **relative** decay across output positions, not absolute quality:
+memorization does not vary by where in the batch an item lands, so it
+cancels out of the head-vs-tail comparison. Results are also
+model-specific; a budget calibrated for one model generation should be
+re-measured for the next. No measured numbers exist yet — this section
+documents the method, and results will be appended here after the first
+paid run.
