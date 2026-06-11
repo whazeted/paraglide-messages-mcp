@@ -12,17 +12,18 @@ export { estimateTokens };
  * orchestration.
  *
  * Models are addressed by spec strings of the form `<provider>:<model>`
- * ("openai:gpt-5", "anthropic:claude-opus-4-8"); a bare model id means
- * Anthropic. Each provider is gated on its own key (ANTHROPIC_API_KEY /
- * OPENAI_API_KEY): a call whose provider has no key runs in dry-run mode
- * (pseudoTranslate + synthesized token counts for translation, a canned
- * stub for judging), which keeps `pnpm test` and CI free, offline, and
- * deterministic. Live translation calls report the API's EXACT output-token
+ * ("openai:gpt-5", "gemini:gemini-3.5-flash",
+ * "anthropic:claude-opus-4-8"); a bare model id means Anthropic. Each
+ * provider is gated on its own key (ANTHROPIC_API_KEY / OPENAI_API_KEY /
+ * GEMINI_API_KEY): a call whose provider has no key runs in dry-run mode
+ * (pseudoTranslate + synthesized token counts for translation, a canned stub
+ * for judging), which keeps `pnpm test` and CI free, offline, and
+ * deterministic. Live translation calls report the API's exact output-token
  * usage so per-item token numbers are anchored to what was actually billed.
  */
 
 export interface ModelSpec {
-	provider: "anthropic" | "openai";
+	provider: "anthropic" | "openai" | "gemini";
 	model: string;
 }
 
@@ -31,7 +32,7 @@ export function parseModelSpec(spec: string): ModelSpec {
 	const colon = spec.indexOf(":");
 	if (colon > 0) {
 		const head = spec.slice(0, colon);
-		if (head === "anthropic" || head === "openai") {
+		if (head === "anthropic" || head === "openai" || head === "gemini") {
 			return { provider: head, model: spec.slice(colon + 1) };
 		}
 	}
@@ -39,9 +40,9 @@ export function parseModelSpec(spec: string): ModelSpec {
 }
 
 export function hasKeyFor(provider: ModelSpec["provider"]): boolean {
-	return provider === "openai"
-		? Boolean(process.env.OPENAI_API_KEY)
-		: Boolean(process.env.ANTHROPIC_API_KEY);
+	if (provider === "openai") return Boolean(process.env.OPENAI_API_KEY);
+	if (provider === "gemini") return Boolean(process.env.GEMINI_API_KEY);
+	return Boolean(process.env.ANTHROPIC_API_KEY);
 }
 
 /** Translator model spec — env-overridable so sweeps can compare models. */
@@ -57,7 +58,7 @@ export const TRANSLATOR_MODEL =
 export const JUDGE_MODELS: string[] = (
 	process.env.BENCH_JUDGE_MODELS ??
 	process.env.BENCH_JUDGE_MODEL ??
-	"claude-opus-4-8"
+	"claude-opus-4-8,gemini:gemini-3.5-flash"
 )
 	.split(",")
 	.map((spec) => spec.trim())
@@ -194,6 +195,29 @@ async function callModelLive(
 	prompt: string,
 	maxTokens: number
 ): Promise<{ text: string; outputTokens: number }> {
+	if (spec.provider === "gemini") {
+		const { GoogleGenAI } = await import("@google/genai");
+		const client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+		const response = await client.models.generateContent({
+			model: spec.model,
+			contents: prompt,
+			config: {
+				maxOutputTokens: maxTokens,
+			},
+		});
+		const usage = response.usageMetadata;
+		return {
+			text: response.text ?? "",
+			outputTokens:
+				usage?.candidatesTokenCount ??
+				Math.max(
+					0,
+					(usage?.totalTokenCount ?? 0) -
+						(usage?.promptTokenCount ?? 0) -
+						(usage?.thoughtsTokenCount ?? 0)
+				),
+		};
+	}
 	if (spec.provider === "openai") {
 		const { default: OpenAI } = await import("openai");
 		const client = new OpenAI();

@@ -7,28 +7,19 @@ import {
 	type MetricOnset,
 } from "./calibration.js";
 import { aggregate, type RunRow } from "./report.js";
+import { runRow } from "./test-helpers.js";
 
 function row(overrides: Partial<RunRow> = {}): RunRow {
 	const sourceText = overrides.sourceText ?? "The system saved the document.";
-	return {
-		runId: "run-1",
-		budget: 1500,
-		targetLocale: "de",
-		model: "test-model",
-		batchIndex: 0,
-		positionInBatch: 0,
-		batchItemCount: 20,
+	return runRow({
 		key: "key_001",
 		sourceChars: sourceText.length,
 		cumulativeOutputTokensAtEmission: 100,
 		outputTokensForItem: 20,
-		validationStatus: "saved",
-		validationErrors: [],
-		warnings: [],
 		targetText: "Das System hat das Dokument gespeichert.",
 		sourceText,
 		...overrides,
-	};
+	});
 }
 
 function passingGateInput() {

@@ -15,25 +15,20 @@ import {
 	type PairwiseVerdict,
 	type QualityItem,
 } from "./judge.js";
+import {
+	qualityItem as makeItem,
+	SENTINEL_BATCH_COUNT,
+	SENTINEL_CHARS,
+	SENTINEL_POSITION,
+} from "./test-helpers.js";
 
-/** Sentinel values that must never leak into a judge prompt. */
-const SENTINEL_POSITION = 7777;
-const SENTINEL_BATCH_COUNT = 8888;
-const SENTINEL_CHARS = 9999;
-
-function makeItem(overrides: Partial<QualityItem> = {}): QualityItem {
-	return {
-		key: "checkout_create_subscription_001",
-		positionInBatch: SENTINEL_POSITION,
-		batchItemCount: SENTINEL_BATCH_COUNT,
-		sourceText:
-			"Your subscription was created successfully. You will receive a confirmation email shortly, and your first invoice arrives next week.",
-		targetText:
-			"Je abonnement is succesvol aangemaakt. Je ontvangt binnenkort een bevestigingsmail, en je eerste factuur komt volgende week.",
-		targetLocale: "nl",
-		sourceChars: SENTINEL_CHARS,
-		...overrides,
-	};
+function expectBlindPrompt(prompt: string, extraForbidden: string[] = []): void {
+	for (const value of [SENTINEL_POSITION, SENTINEL_BATCH_COUNT, SENTINEL_CHARS]) {
+		expect(prompt).not.toContain(String(value));
+	}
+	for (const word of ["position", "batch", "budget", ...extraForbidden]) {
+		expect(prompt.toLowerCase()).not.toContain(word);
+	}
 }
 
 describe("buildMqmPrompt", () => {
@@ -62,14 +57,7 @@ describe("buildMqmPrompt", () => {
 	});
 
 	it("never leaks batch position, batch size, or budget (blindness)", () => {
-		const prompt = buildMqmPrompt(makeItem());
-		expect(prompt).not.toContain(String(SENTINEL_POSITION));
-		expect(prompt).not.toContain(String(SENTINEL_BATCH_COUNT));
-		expect(prompt).not.toContain(String(SENTINEL_CHARS));
-		expect(prompt.toLowerCase()).not.toContain("position");
-		expect(prompt.toLowerCase()).not.toContain("batch");
-		expect(prompt.toLowerCase()).not.toContain("budget");
-		expect(prompt.toLowerCase()).not.toContain("token");
+		expectBlindPrompt(buildMqmPrompt(makeItem()), ["token"]);
 	});
 });
 
@@ -157,12 +145,7 @@ describe("buildPairwisePrompt", () => {
 
 	it("never leaks batch position, batch size, or budget (blindness)", () => {
 		const { prompt } = buildPairwisePrompt(head, tail, 1);
-		expect(prompt).not.toContain(String(SENTINEL_POSITION));
-		expect(prompt).not.toContain(String(SENTINEL_BATCH_COUNT));
-		expect(prompt).not.toContain(String(SENTINEL_CHARS));
-		expect(prompt.toLowerCase()).not.toContain("position");
-		expect(prompt.toLowerCase()).not.toContain("batch");
-		expect(prompt.toLowerCase()).not.toContain("budget");
+		expectBlindPrompt(prompt);
 	});
 
 	it("is deterministic for a given seed", () => {

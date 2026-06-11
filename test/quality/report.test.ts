@@ -7,34 +7,7 @@ import {
 	type MetricFn,
 	type RunRow,
 } from "./report.js";
-
-/**
- * Build a fully-valid row with overridable fields. The synthetic "quality
- * score" for the planted-decay tests is carried in `outputTokensForItem`
- * so the metric function stays a plain per-row reader, exactly like the
- * real Tier-1/Tier-2 scorers will be.
- */
-function makeRow(overrides: Partial<RunRow> = {}): RunRow {
-	return {
-		runId: "run-1",
-		budget: 1500,
-		targetLocale: "de",
-		model: "test-model",
-		batchIndex: 0,
-		positionInBatch: 0,
-		batchItemCount: 20,
-		key: "fiction_austen_001",
-		sourceChars: 412,
-		cumulativeOutputTokensAtEmission: 0,
-		outputTokensForItem: 10,
-		validationStatus: "saved",
-		validationErrors: [],
-		warnings: [],
-		targetText: "Übersetzter Text",
-		sourceText: "Translated text",
-		...overrides,
-	};
-}
+import { runRow as makeRow } from "./test-helpers.js";
 
 function toJsonl(rows: RunRow[]): string {
 	return rows.map((r) => JSON.stringify(r)).join("\n");

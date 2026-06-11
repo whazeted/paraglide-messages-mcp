@@ -6,32 +6,8 @@ import {
 	repetitionScore,
 	summarizationOutliers,
 	validationFailureRate,
-	type BenchmarkRow,
 } from "./metrics.js";
-
-/** Build a row with sensible defaults, overridable per test. */
-function row(overrides: Partial<BenchmarkRow>): BenchmarkRow {
-	const sourceText = overrides.sourceText ?? "Hello world, how are you today?";
-	return {
-		runId: "run-1",
-		budget: 1500,
-		targetLocale: "de",
-		model: "test-model",
-		batchIndex: 0,
-		positionInBatch: 0,
-		batchItemCount: 10,
-		key: "key_0",
-		sourceChars: sourceText.length,
-		cumulativeOutputTokensAtEmission: 100,
-		outputTokensForItem: 50,
-		validationStatus: "saved",
-		validationErrors: [],
-		warnings: [],
-		targetText: "Hallo Welt, wie geht es dir heute?",
-		sourceText,
-		...overrides,
-	};
-}
+import { benchmarkRow as row } from "./test-helpers.js";
 
 describe("copyThroughRate", () => {
 	it("returns 0 for an empty input", () => {

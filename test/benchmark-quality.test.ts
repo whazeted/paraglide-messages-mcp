@@ -62,7 +62,7 @@ import {
  * per budget — the token dropoff the run exists to find.
  *
  * Excluded from `pnpm test` by the existing `test/benchmark*.test.ts`
- * pattern; run via `pnpm bench:quality`. Without ANTHROPIC_API_KEY the whole
+ * pattern; run via `pnpm bench:quality`. Without a translator key the whole
  * sweep is a deterministic offline dry-run that finishes in seconds.
  */
 
@@ -81,7 +81,7 @@ const JUDGE_SAMPLE = Math.max(
 	Number(process.env.BENCH_JUDGE_SAMPLE ?? 20)
 );
 
-/** Concurrent judge calls; small to stay friendly to both providers. */
+/** Concurrent judge calls; small to stay friendly to every provider. */
 const JUDGE_CONCURRENCY = 8;
 
 /** Source rows used for anchor and repeat-judgment reliability checks. */

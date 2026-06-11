@@ -18,6 +18,7 @@ import {
 
 beforeEach(() => {
 	vi.stubEnv("ANTHROPIC_API_KEY", "");
+	vi.stubEnv("GEMINI_API_KEY", "");
 });
 
 afterEach(() => {
@@ -210,6 +211,10 @@ describe("parseModelSpec / provider gating", () => {
 			provider: "openai",
 			model: "gpt-5",
 		});
+		expect(parseModelSpec("gemini:gemini-3.5-flash")).toEqual({
+			provider: "gemini",
+			model: "gemini-3.5-flash",
+		});
 		expect(parseModelSpec("anthropic:claude-opus-4-8")).toEqual({
 			provider: "anthropic",
 			model: "claude-opus-4-8",
@@ -229,10 +234,13 @@ describe("parseModelSpec / provider gating", () => {
 		const { hasKeyFor, isDryRun } = await import("./driver.js");
 		vi.stubEnv("ANTHROPIC_API_KEY", "");
 		vi.stubEnv("OPENAI_API_KEY", "test-key");
+		vi.stubEnv("GEMINI_API_KEY", "test-key");
 		expect(hasKeyFor("anthropic")).toBe(false);
 		expect(hasKeyFor("openai")).toBe(true);
+		expect(hasKeyFor("gemini")).toBe(true);
 		expect(isDryRun("claude-sonnet-4-6")).toBe(true);
 		expect(isDryRun("openai:gpt-5")).toBe(false);
+		expect(isDryRun("gemini:gemini-3.5-flash")).toBe(false);
 		vi.unstubAllEnvs();
 	});
 
@@ -240,7 +248,11 @@ describe("parseModelSpec / provider gating", () => {
 		const { callJudge, DRY_RUN_JUDGE_STUB } = await import("./driver.js");
 		vi.stubEnv("ANTHROPIC_API_KEY", "");
 		vi.stubEnv("OPENAI_API_KEY", "");
+		vi.stubEnv("GEMINI_API_KEY", "");
 		expect(await callJudge("prompt", "openai:gpt-5")).toBe(DRY_RUN_JUDGE_STUB);
+		expect(await callJudge("prompt", "gemini:gemini-3.5-flash")).toBe(
+			DRY_RUN_JUDGE_STUB
+		);
 		expect(await callJudge("prompt", "anthropic:claude-opus-4-8")).toBe(
 			DRY_RUN_JUDGE_STUB
 		);

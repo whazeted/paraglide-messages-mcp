@@ -42,6 +42,24 @@ function sampleCorpusFile(category = "fiction"): CorpusFile {
 	};
 }
 
+const corpusViolationCases = [
+	["without exactly 10 paragraphs", (file) => { file.paragraphs = file.paragraphs.slice(0, 9); }, "exactly 10 paragraphs"],
+	["with a chars/text.length mismatch", (file) => { file.paragraphs[0]!.chars = 999; }, "must equal text.length"],
+	["with an id outside the file's category", (file) => { file.paragraphs[0]!.id = "legal_sample_001"; }, 'start with "fiction_"'],
+	["with an id outside <category>_<source>_<nnn>", (file) => { file.paragraphs[0]!.id = "fiction_sample_1"; }, "<category>_<source>_<nnn>"],
+	["with a paragraph below 200 chars", (file) => { file.paragraphs[0] = sampleParagraph("fiction", 0, 150); }, "outside 200-2500"],
+	["with a paragraph above 2500 chars", (file) => { file.paragraphs[9] = sampleParagraph("fiction", 9, 2600); }, "outside 200-2500"],
+	["with fewer than 2 short paragraphs", (file) => {
+		file.paragraphs[0] = sampleParagraph("fiction", 0, 600);
+		file.paragraphs[1] = sampleParagraph("fiction", 1, 600);
+	}, "under 500 chars"],
+	["with fewer than 2 long paragraphs", (file) => {
+		file.paragraphs[7] = sampleParagraph("fiction", 7, 1100);
+		file.paragraphs[8] = sampleParagraph("fiction", 8, 1100);
+	}, "over 1200 chars"],
+	["with duplicate paragraph ids", (file) => { file.paragraphs[1]!.id = file.paragraphs[0]!.id; }, "is a duplicate"],
+] satisfies Array<readonly [string, (file: CorpusFile) => void, string]>;
+
 describe("validateCorpusFile", () => {
 	it("accepts a valid corpus file", () => {
 		expect(validateCorpusFile(sampleCorpusFile())).toEqual([]);
@@ -53,79 +71,15 @@ describe("validateCorpusFile", () => {
 		expect(validateCorpusFile("nope")).toHaveLength(1);
 	});
 
-	it("rejects a file without exactly 10 paragraphs", () => {
-		const file = sampleCorpusFile();
-		file.paragraphs = file.paragraphs.slice(0, 9);
-		expect(validateCorpusFile(file)).toContainEqual(
-			expect.stringContaining("exactly 10 paragraphs")
-		);
-	});
-
-	it("rejects a chars/text.length mismatch", () => {
-		const file = sampleCorpusFile();
-		file.paragraphs[0]!.chars = 999;
-		expect(validateCorpusFile(file)).toContainEqual(
-			expect.stringContaining("must equal text.length")
-		);
-	});
-
-	it("rejects ids that do not start with the file's category", () => {
-		const file = sampleCorpusFile();
-		file.paragraphs[0]!.id = "legal_sample_001";
-		expect(validateCorpusFile(file)).toContainEqual(
-			expect.stringContaining('start with "fiction_"')
-		);
-	});
-
-	it("rejects ids that do not match <category>_<source>_<nnn>", () => {
-		const file = sampleCorpusFile();
-		file.paragraphs[0]!.id = "fiction_sample_1"; // nnn must be 3 digits
-		expect(validateCorpusFile(file)).toContainEqual(
-			expect.stringContaining("<category>_<source>_<nnn>")
-		);
-	});
-
-	it("rejects paragraphs outside the 200-2500 char range", () => {
-		const tooShort = sampleCorpusFile();
-		const shortParagraph = sampleParagraph("fiction", 0, 150);
-		tooShort.paragraphs[0] = shortParagraph;
-		expect(validateCorpusFile(tooShort)).toContainEqual(
-			expect.stringContaining("outside 200-2500")
-		);
-
-		const tooLong = sampleCorpusFile();
-		tooLong.paragraphs[9] = sampleParagraph("fiction", 9, 2600);
-		expect(validateCorpusFile(tooLong)).toContainEqual(
-			expect.stringContaining("outside 200-2500")
-		);
-	});
-
-	it("rejects a file with fewer than 2 short paragraphs", () => {
-		const file = sampleCorpusFile();
-		// Lift two of the three short paragraphs above the 500-char threshold.
-		file.paragraphs[0] = sampleParagraph("fiction", 0, 600);
-		file.paragraphs[1] = sampleParagraph("fiction", 1, 600);
-		expect(validateCorpusFile(file)).toContainEqual(
-			expect.stringContaining("under 500 chars")
-		);
-	});
-
-	it("rejects a file with fewer than 2 long paragraphs", () => {
-		const file = sampleCorpusFile();
-		file.paragraphs[7] = sampleParagraph("fiction", 7, 1100);
-		file.paragraphs[8] = sampleParagraph("fiction", 8, 1100);
-		expect(validateCorpusFile(file)).toContainEqual(
-			expect.stringContaining("over 1200 chars")
-		);
-	});
-
-	it("rejects duplicate paragraph ids", () => {
-		const file = sampleCorpusFile();
-		file.paragraphs[1]!.id = file.paragraphs[0]!.id;
-		expect(validateCorpusFile(file)).toContainEqual(
-			expect.stringContaining("is a duplicate")
-		);
-	});
+	for (const [name, mutate, message] of corpusViolationCases) {
+		it(`rejects a file ${name}`, () => {
+			const file = sampleCorpusFile();
+			mutate(file);
+			expect(validateCorpusFile(file)).toContainEqual(
+				expect.stringContaining(message)
+			);
+		});
+	}
 
 	it("rejects empty provenance fields", () => {
 		const file = sampleCorpusFile();

@@ -11,7 +11,7 @@ metrics.
 Run the sweep with:
 
 ```sh
-ANTHROPIC_API_KEY=... OPENAI_API_KEY=... pnpm bench:quality
+ANTHROPIC_API_KEY=... OPENAI_API_KEY=... GEMINI_API_KEY=... pnpm bench:quality
 ```
 
 The runner writes JSONL rows, markdown reports, and config JSON into
@@ -19,6 +19,11 @@ The runner writes JSONL rows, markdown reports, and config JSON into
 that validates corpus loading, batch construction, report writing, and JSONL
 plumbing. Dry runs are always non-admissible and never emit a recommended
 default.
+
+Models are configured with `<provider>:<model>` specs. Bare model ids are
+treated as Anthropic for backward compatibility. The default judge set is
+`claude-opus-4-8,gemini:gemini-3.5-flash`; override it with
+`BENCH_JUDGE_MODELS` to compare a different panel.
 
 Each live run records:
 
@@ -76,4 +81,3 @@ Budget `0` is an unbounded control arm and is never recommended.
 | [A Systematic Study of Position Bias](https://arxiv.org/html/2406.07791v9) | Shows that position bias can distort pairwise/listwise judging, motivating randomized A/B order and the A-slot win-rate gate. |
 | [WMT24 Metrics Shared Task](https://aclanthology.org/2024.wmt-1.2/) | Shows that LLM-generated MT stresses automatic metrics, motivating a multi-signal approach rather than relying on one judge score. |
 | [RUBRIC-MQM](https://aclanthology.org/2025.acl-industry.12/) | Highlights label bias and near-perfect-translation limits in LLM-as-judge MT evaluation, motivating planted anchors and judge meta-evaluation. |
-
