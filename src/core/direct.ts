@@ -18,7 +18,7 @@ export const MESSAGE_FORMAT_PLUGIN_KEY = "plugin.inlang.messageFormat";
 const MESSAGE_FILE_SCHEMA = "https://inlang.com/schema/inlang-message-format";
 
 const UNSUPPORTED_PROJECT =
-	"paraglide-mcp only supports inlang message-format projects: settings.json " +
+	"paraglide-messages-mcp only supports inlang message-format projects: settings.json " +
 	`must configure "${MESSAGE_FORMAT_PLUGIN_KEY}" with a single string ` +
 	'pathPattern containing "{locale}", and no other import/export plugin ' +
 	"module. See COMPATIBILITY.md.";

@@ -27,7 +27,7 @@ export function scaffoldProject(args: {
 	locales: string[];
 	messages: Record<string, Record<string, unknown>>;
 }): FixtureProject {
-	const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "paraglide-mcp-test-"));
+	const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "paraglide-messages-mcp-test-"));
 	const projectPath = path.join(rootDir, "project.inlang");
 	const messagesDir = path.join(rootDir, "messages");
 	fs.mkdirSync(projectPath);

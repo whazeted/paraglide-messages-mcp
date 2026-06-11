@@ -1,6 +1,6 @@
 # Compatibility
 
-Which project setups paraglide-mcp works with, and what to expect.
+Which project setups paraglide-messages-mcp works with, and what to expect.
 
 ## TL;DR
 
@@ -14,7 +14,7 @@ Which project setups paraglide-mcp works with, and what to expect.
 
 ## What the server requires
 
-paraglide-mcp reads and writes the inlang **message format** JSON files
+paraglide-messages-mcp reads and writes the inlang **message format** JSON files
 directly. The project's `project.inlang/settings.json` must declare:
 
 - `baseLocale` (string) and `locales` (array of strings)
@@ -41,7 +41,7 @@ dropped deliberately:
 - **Speed.** Tool calls take single-digit milliseconds regardless of project
   size; the SDK's load/save cycle grew into seconds on large projects.
 - **Footprint.** Dropping `@inlang/sdk` removes the sqlite-wasm runtime and
-  the bulk of the dependency tree, which makes `npx paraglide-mcp` start
+  the bulk of the dependency tree, which makes `npx paraglide-messages-mcp` start
   fast and work fully offline.
 
 What you keep either way:

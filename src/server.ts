@@ -16,7 +16,7 @@ export function createServer(projectPath: string): McpServer {
 	const service = new TranslationService(projectPath);
 
 	const server = new McpServer({
-		name: "paraglide-mcp",
+		name: "paraglide-messages-mcp",
 		version: SERVER_VERSION,
 	});
 

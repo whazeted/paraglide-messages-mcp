@@ -3,11 +3,11 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { discoverProjectPath } from "./core/project.js";
 import { createServer, SERVER_VERSION } from "./server.js";
 
-const HELP = `paraglide-mcp ${SERVER_VERSION}
+const HELP = `paraglide-messages-mcp ${SERVER_VERSION}
 MCP server (stdio) for translating Paraglide JS / inlang projects.
 
 Usage:
-  npx paraglide-mcp [--project <path/to/project.inlang>]
+  npx paraglide-messages-mcp [--project <path/to/project.inlang>]
 
 Options:
   --project <path>  Path to the inlang project directory. Defaults to
@@ -21,7 +21,7 @@ Example MCP client configuration (.mcp.json / claude_desktop_config.json):
     "mcpServers": {
       "paraglide": {
         "command": "npx",
-        "args": ["-y", "paraglide-mcp", "--project", "./project.inlang"]
+        "args": ["-y", "paraglide-messages-mcp", "--project", "./project.inlang"]
       }
     }
   }
@@ -55,13 +55,13 @@ async function main() {
 	});
 
 	// stdout is reserved for the MCP protocol — log to stderr only
-	process.stderr.write(`paraglide-mcp: serving project at ${projectPath}\n`);
+	process.stderr.write(`paraglide-messages-mcp: serving project at ${projectPath}\n`);
 
 	const server = createServer(projectPath);
 	await server.connect(new StdioServerTransport());
 }
 
 main().catch((error) => {
-	process.stderr.write(`paraglide-mcp: ${error?.message ?? error}\n`);
+	process.stderr.write(`paraglide-messages-mcp: ${error?.message ?? error}\n`);
 	process.exit(1);
 });

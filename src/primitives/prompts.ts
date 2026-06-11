@@ -161,7 +161,7 @@ function translateWorkflow(args: {
 		.filter(Boolean)
 		.join(", ");
 
-	return `Translate ${scope} into "${args.targetLocale}" using the paraglide-mcp tools. You are the translator; the server provides the messages and validates + writes your translations.
+	return `Translate ${scope} into "${args.targetLocale}" using the paraglide-messages-mcp tools. You are the translator; the server provides the messages and validates + writes your translations.
 
 Workflow:
 1. Call project_info to confirm the locale and see how many messages are missing.
@@ -192,7 +192,7 @@ function orchestrateWorkflow(args: {
 		.filter(Boolean)
 		.join(", ");
 
-	return `Translate all missing messages${scope} into ${targets} using the paraglide-mcp tools, with one subagent per locale running in parallel. You are the orchestrator: you decide the style once, delegate the translation, and verify the result. Locales live in separate files and the translate tools only read/write the source and target locale, so per-locale subagents cannot interfere with each other.
+	return `Translate all missing messages${scope} into ${targets} using the paraglide-messages-mcp tools, with one subagent per locale running in parallel. You are the orchestrator: you decide the style once, delegate the translation, and verify the result. Locales live in separate files and the translate tools only read/write the source and target locale, so per-locale subagents cannot interfere with each other.
 
 Workflow:
 1. Call project_info for the base locale, target locales, and per-locale missing counts. Skip locales with 0 missing messages.

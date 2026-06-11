@@ -1,21 +1,32 @@
-# paraglide-mcp
+# paraglide-messages-mcp
 
-An MCP (Model Context Protocol) server for translating [Paraglide JS](https://inlang.com/m/gerre34r/library-inlang-paraglideJs) / [inlang](https://inlang.com) projects.
+[![npm](https://img.shields.io/npm/v/paraglide-messages-mcp)](https://www.npmjs.com/package/paraglide-messages-mcp)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![node >= 20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
 
-The agent calling the tools **is** the translator. The server's job is to make
-that safe and efficient: it serves messages in per-locale batches, validates
-every translation against the source (placeholders, markup, variant structure)
-before anything is written, and reports progress so the agent knows exactly
-when a locale is done. Faulty items are rejected individually — one bad
-translation never blocks or corrupts the rest of the batch, which is what
-makes large batches safe. The translate loop reads and writes only the source
-and target locale's files, so one agent (or subagent) per locale can run in
-parallel without interfering with the others.
+An MCP server that turns AI agents into a parallel translation team for
+[Paraglide JS](https://inlang.com/m/gerre34r/library-inlang-paraglideJs) /
+[inlang](https://inlang.com) `messages/{locale}.json` files.
+
+The agent calling the tools **is** the translator. The server makes that
+safe and fast:
+
+- **Validated writes** — every translation is checked against the source
+  (placeholders, markup, plural variants) before anything lands on disk;
+  bad items are rejected individually, never the whole batch.
+- **One agent per locale, in parallel** — the translate loop reads and
+  writes only the source and target locale's files, so subagents can
+  translate all locales concurrently without conflicts.
+- **Fast and offline** — direct JSON file access with a stat-validated
+  cache; tool calls cost milliseconds regardless of project size, and no
+  network is ever needed.
+- **Toolchain-invisible** — written files are byte-compatible with the
+  message-format plugin's own output, and external edits (editor, compiler,
+  git) are always picked up.
 
 ## Quick start
 
-No installation needed — run it via `npx` from your MCP client configuration.
-Add this to your project's `.mcp.json` (Claude Code) or
+No installation — add this to your `.mcp.json` (Claude Code) or
 `claude_desktop_config.json`:
 
 ```json
@@ -23,223 +34,82 @@ Add this to your project's `.mcp.json` (Claude Code) or
   "mcpServers": {
     "paraglide": {
       "command": "npx",
-      "args": ["-y", "paraglide-mcp", "--project", "./project.inlang"]
+      "args": ["-y", "paraglide-messages-mcp", "--project", "./project.inlang"]
     }
   }
 }
 ```
 
-`--project` is optional: by default the server looks for `project.inlang` in
-the working directory, then for a single `*.inlang` directory up to one level
-deep.
+`--project` is optional: the server finds `project.inlang` in the working
+directory (or a single `*.inlang` directory up to one level deep) by itself.
 
-The server holds no translation state — every tool call checks your
-`messages/{locale}.json` files on disk (re-parsing only the ones that
-changed, via a stat-validated cache) and writes changes back in the exact
-format the inlang message-format plugin produces (`$schema` header, tab
-indentation, optional key sort), so the rest of your toolchain sees no
-difference. External edits (your editor, the Paraglide compiler, git) are
-always picked up. No network access is ever needed.
-
-Requires the standard Paraglide JS setup: the message format plugin with a
-single message file per locale — see [COMPATIBILITY.md](COMPATIBILITY.md)
-for the exact criteria and why other inlang plugins (i18next, next-intl,
-ICU) are not supported.
+Then ask your agent to translate — or use the `translate_project` prompt to
+translate every locale at once with one subagent per locale.
 
 ## Tools
 
 | Tool | Purpose |
 | --- | --- |
-| `project_info` | Locales, base locale, and per-locale translated/missing counts. |
-| `list_message_keys` | Keys only (cheap), filterable by key prefix (`startsWith`) and per-locale status (`missing` / `translated`), with cursor pagination. |
-| `get_messages` | Full message content by exact keys or prefix, optionally restricted to specific locales. |
-| `search_messages` | Find messages by text content or key substring (case-insensitive) — for when you know the UI text ("Add to cart") but not the key. |
-| `get_translation_batch` | The next *N* untranslated messages for a target locale (default 50, max 200), with source text, required placeholders, and a `remaining` counter. Reads only the source and target locale files. |
-| `save_translations` | Validate and persist translations for one locale (max 200 per call). Per-item results; valid items are saved even when others fail. Writes only the target locale's file. |
-| `delete_messages` | Delete messages by key from every locale (max 200 per call). Unknown keys are rejected individually while the rest are still deleted. |
-| `rename_message` | Rename a message key across every locale, keeping all translated values. Fails without changes when the old key is missing or the new key is taken. |
-| `add_locale` | Add a locale to the project settings (and seed an empty message file for message-format projects). Locale tags are stored as-is — no format opinion. |
-| `remove_locale` | Remove a locale from the settings and delete its message file. Reports how many translations were discarded; the base locale can't be removed. |
+| `project_info` | Locales, base locale, per-locale translated/missing counts. |
+| `get_translation_batch` | Next batch of untranslated messages for a locale (default 50, max 200), with source text and required placeholders. |
+| `save_translations` | Validate and persist translations for one locale; per-item results. |
+| `list_message_keys` | Keys only, filterable by prefix and status, paginated. |
+| `get_messages` | Full message content by keys or prefix. |
+| `search_messages` | Find messages by text or key substring. |
+| `delete_messages` / `rename_message` | Key management across all locales. |
+| `add_locale` / `remove_locale` | Locale management in `settings.json`. |
 
 ## Prompts
 
-The server also exposes the common workflows as MCP prompts, so clients that
-support prompts (e.g. `/mcp__paraglide__translate_locale` in Claude Code) can
-launch them directly without the bundled skill:
-
-| Prompt | Arguments | Purpose |
-| --- | --- | --- |
-| `translate_locale` | `targetLocale`, `sourceLocale?` | Translate all missing messages into one locale via the batch loop. |
-| `translate_prefix` | `prefix`, `targetLocale`, `sourceLocale?` | Same loop, scoped to keys starting with `prefix`. |
-| `translate_project` | `locales?`, `prefix?` | Translate every locale at once: the main agent settles a style brief (tone, formality, glossary), then fans out one subagent per locale in parallel. |
-| `review_locale` | `locale`, `prefix?` | Review existing translations against the base locale and fix problems. |
-
-Locale and prefix arguments support MCP completion: locales are suggested from
-the project settings, prefixes from the actual message keys.
-
-## Resources
-
-Read-only project state is also exposed as MCP resources, so clients can pin
-it as context (e.g. `@`-mention in Claude Code) without spending tool calls:
-
-| Resource | Purpose |
+| Prompt | Purpose |
 | --- | --- |
-| `paraglide://project/info` | Project overview — same payload as the `project_info` tool. |
-| `paraglide://locales/{locale}/missing` | All keys missing or empty in `{locale}`. One resource per project locale appears in the resource list. |
-| `paraglide://messages/{locale}/{key}` | The value of one message in one locale (`value` is `null` when untranslated). |
+| `translate_project` | Translate every locale: the main agent settles a style brief (tone, formality, glossary), then fans out one subagent per locale in parallel. |
+| `translate_locale` | Translate one locale via the batch loop. |
+| `translate_prefix` | Same, scoped to keys starting with a prefix. |
+| `review_locale` | Review existing translations against the base locale and fix problems. |
 
-All resources return JSON. The `{locale}` and `{key}` template variables
-support MCP completion, like the prompt arguments.
-
-### The translation loop
-
-Agents translate iteratively — per-item validation keeps the error rate low
-while large batches and the loop keep throughput high (no re-reading of the
-full catalog between steps, and `remaining` tells the agent exactly when to
-stop). Because each locale's loop only touches its own files, the per-locale
-loops can run as parallel subagents (see the `translate_project` prompt):
-
-```
-project_info  +  style brief (tone, formality, glossary)
-└─ one (sub)agent per target locale, in parallel:
-   ┌─> get_translation_batch { targetLocale: "de", batchSize: 50 }
-   │   ... agent translates the 50 items ...
-   │   save_translations { targetLocale: "de", translations: [...] }
-   └── repeat until done == true
-```
-
-Scope work to a subsection of the catalog with `prefix`, e.g. only
-`checkout_*` messages:
-
-```json
-{ "targetLocale": "de", "prefix": "checkout_", "batchSize": 50 }
-```
-
-### Message values
-
-Values use the inlang message format — exactly what's in your
-`messages/{locale}.json` files:
-
-```jsonc
-// simple message
-"Hello {name}!"
-
-// multi-variant message (plurals, gender, ...)
-[{
-  "declarations": ["input count", "local countPlural = count: plural"],
-  "selectors": ["countPlural"],
-  "match": {
-    "countPlural=one": "You have {count} message",
-    "countPlural=other": "You have {count} messages"
-  }
-}]
-```
-
-Translations may change shape when the target language requires it (e.g. a
-string becomes a plural variant set for Czech) as long as introduced
-selectors are declared.
-
-Variant arrays with more than one element (found in some legacy or
-hand-written files) are read in full — placeholders from every element count
-— but can't be saved back as-is, because the message-format plugin and the
-Paraglide compiler silently ignore everything after the first element. The
-save error explains the fix: consolidate all variants into one element's
-`match`.
-
-### Validation
-
-`save_translations` rejects, per item:
-
-- placeholders that don't exist in the source message (typo guard — a
-  `{nmae}` would otherwise silently become a new input variable),
-- markup tags (`{#bold}`…) not present in the source,
-- match conditions using undeclared selectors,
-- structurally invalid values,
-- unknown message keys (unless `allowNewKeys: true` is passed deliberately).
-
-Dropped source placeholders produce warnings, not errors, since languages
-legitimately drop variables in some variants.
-
-The source-comparison checks can be bypassed per call with
-`skipValidation: true` — for translations that deliberately diverge from the
-source, e.g. when the target doesn't need a placeholder. Structural validation
-and the unknown-key guard still apply.
+Read-only state is also exposed as MCP resources
+(`paraglide://project/info`, `paraglide://locales/{locale}/missing`,
+`paraglide://messages/{locale}/{key}`), so clients can pin it as context
+without spending tool calls.
 
 ## Agent skill
 
-`skill/paraglide-translation/` contains an installable skill that teaches an
-agent the batch workflow, plural-rule handling, and error recovery. It uses
-the open [Agent Skills](https://agentskills.io) format, so it works with any
-agent that supports `SKILL.md` (Claude Code, Codex, Cursor, Copilot, Gemini
-CLI, ...).
-
-**Claude Code** — install the plugin, which bundles both the MCP server and
-the skill (no `.mcp.json` needed):
-
-```
-/plugin marketplace add WesHaze/paraglide-mcp
-/plugin install paraglide-translation@paraglide-mcp
-```
-
-**Any other agent** — install the skill with the [skills CLI](https://github.com/vercel-labs/skills)
-(it picks the right directory for your agent), then configure the MCP server
-as shown in Quick start:
+`skill/paraglide-translation/` is an installable skill in the open
+[Agent Skills](https://agentskills.io) format that teaches any agent the
+workflow, plural-rule handling, and error recovery.
 
 ```sh
+# Claude Code (plugin bundles the MCP server + skill, no .mcp.json needed)
+/plugin marketplace add WesHaze/paraglide-mcp
+/plugin install paraglide-translation@paraglide-mcp
+
+# any other agent, via the skills CLI
 npx skills add WesHaze/paraglide-mcp
 ```
 
-Or copy it manually:
+## Compatibility
 
-```sh
-cp -r node_modules/paraglide-mcp/skill/paraglide-translation .claude/skills/
-# or globally: cp -r ... ~/.claude/skills/
-```
+Requires the standard Paraglide JS setup: the inlang **message format**
+plugin with a single message file per locale (any `pathPattern` location).
+Other inlang plugins (i18next, next-intl, ICU) and multi-file namespaces are
+deliberately not supported — see [COMPATIBILITY.md](COMPATIBILITY.md) for
+the exact criteria and reasoning.
 
-## Development
+## Performance
 
-```sh
-pnpm install
-pnpm test        # unit + integration tests (no build needed)
-pnpm test:e2e    # builds, then drives the real CLI over stdio MCP
-pnpm test:all    # everything
-pnpm bench       # performance benchmark (see PERFORMANCE.md)
-pnpm build
-```
+A full 10-locale translation run over a 5,000-message project costs ~3 s of
+server time — the pipeline is bounded by the agent's translation speed, not
+the server. Measurements and history in [PERFORMANCE.md](PERFORMANCE.md).
 
-Integration and e2e tests run against real inlang project fixtures on disk —
-no mocks.
+## Documentation
 
-Message files are read and written directly as JSON (no inlang SDK), scoped
-to the locales each call needs — see [PERFORMANCE.md](PERFORMANCE.md) for
-the measurements and rationale.
+- [DEVELOPMENT.md](DEVELOPMENT.md) — architecture, message format details,
+  validation rules, building, testing, benchmarking, releasing
+- [DECISIONS.md](DECISIONS.md) — decision log: what was chosen and why
+- [COMPATIBILITY.md](COMPATIBILITY.md) — supported project setups
+- [PERFORMANCE.md](PERFORMANCE.md) — benchmarks and optimization history
 
-### Releasing
+## License
 
-Releases are automated: pushing a `v*` tag runs
-[release.yml](.github/workflows/release.yml), which tests, publishes to npm
-via [trusted publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC —
-no token secrets), and syncs the version to the official
-[MCP Registry](https://registry.modelcontextprotocol.io).
-
-One-time setup before the first tagged release:
-
-1. Publish the first version locally (`pnpm build && npm publish`) — npm only
-   lets you configure a trusted publisher for a package that already exists.
-2. On npmjs.com → package → Settings, add a GitHub Actions trusted publisher:
-   org `WesHaze`, repository `paraglide-mcp`, workflow filename `release.yml`.
-3. Set publishing access to "Require two-factor authentication and disallow
-   tokens".
-
-Then release with:
-
-```sh
-npm version patch   # bumps package.json, commits, tags
-git push --follow-tags
-```
-
-## Requirements
-
-- Node.js >= 20
-- An inlang project (Paraglide JS default setup works out of the box) — see
-  [COMPATIBILITY.md](COMPATIBILITY.md) for supported formats and plugins
+[MIT](LICENSE)

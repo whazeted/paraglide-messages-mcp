@@ -1,9 +1,9 @@
 {
-	"name": "paraglide-mcp",
+	"name": "paraglide-messages-mcp",
 	"version": "0.1.0",
 	"description": "MCP server for translating Paraglide JS / inlang projects in validated per-locale batches — built for one agent per locale in parallel",
 	"license": "MIT",
-	"mcpName": "io.github.weshaze/paraglide-mcp",
+	"mcpName": "io.github.weshaze/paraglide-messages-mcp",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/WesHaze/paraglide-mcp.git"
@@ -18,7 +18,7 @@
 		"node": ">=20.0.0"
 	},
 	"bin": {
-		"paraglide-mcp": "./dist/cli.js"
+		"paraglide-messages-mcp": "./dist/cli.js"
 	},
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
