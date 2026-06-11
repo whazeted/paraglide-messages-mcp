@@ -56,13 +56,11 @@ function scopedLocales(
 	project: DirectProject,
 	options?: ReadOptions
 ): string[] {
-	return options?.onlyLocales
-		? project.locales.filter(
-				(locale) =>
-					locale === project.baseLocale ||
-					options.onlyLocales!.includes(locale)
-			)
-		: project.locales;
+	if (!options?.onlyLocales) return project.locales;
+	const scoped = new Set(options.onlyLocales);
+	return project.locales.filter(
+		(locale) => locale === project.baseLocale || scoped.has(locale)
+	);
 }
 
 /** Loads a fresh snapshot of the project's messages. */

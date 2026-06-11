@@ -99,9 +99,7 @@ function messageReferencesOf(
 	const markup = new Set<string>();
 
 	for (const pattern of patternsOf(value)) {
-		const placeholders = extractPlaceholders(pattern);
-		for (const variable of placeholders.variables) variables.add(variable);
-		for (const tag of placeholders.markup) markup.add(tag);
+		collectPlaceholders(pattern, variables, markup);
 	}
 
 	if (options?.includeInputDeclarations !== false && isComplexMessage(value)) {
@@ -115,6 +113,32 @@ function messageReferencesOf(
 	}
 
 	return { variables, markup };
+}
+
+function collectPlaceholders(
+	pattern: string,
+	variables: Set<string>,
+	markup: Set<string>
+): void {
+	for (let i = 0; i < pattern.length; i++) {
+		const char = pattern[i];
+		if (char === "\\") {
+			i += 1;
+			continue;
+		}
+		if (char !== "{") continue;
+
+		const closing = findClosingBrace(pattern, i);
+		if (closing === -1) continue;
+
+		const body = pattern.slice(i + 1, closing);
+		if (body.startsWith("#") || body.startsWith("/")) {
+			markup.add(`{${body}}`);
+		} else if (body.length > 0) {
+			variables.add(body);
+		}
+		i = closing;
+	}
 }
 
 export interface ValidationResult {
@@ -151,8 +175,11 @@ export function validateTranslation(
 	});
 	const sourceVariables = sourceReferences.variables;
 	const sourceMarkup = sourceReferences.markup;
-	const sourcePlaceholders =
-		[...sourceVariables].sort().map((v) => `{${v}}`).join(", ") || "none";
+	let sourcePlaceholders: string | undefined;
+	const getSourcePlaceholders = () =>
+		(sourcePlaceholders ??=
+			[...sourceVariables].sort().map((v) => `{${v}}`).join(", ") ||
+			"none");
 
 	// selectors of a complex translation count as known variables
 	const knownVariables = new Set(sourceVariables);
@@ -198,7 +225,7 @@ export function validateTranslation(
 		warnings,
 		unknownMessage: (variable) =>
 			`placeholder {${variable}} does not exist in the source message ` +
-			`(source placeholders: ${sourcePlaceholders})`,
+			`(source placeholders: ${getSourcePlaceholders()})`,
 		missingMessage: (variable) =>
 			`source placeholder {${variable}} is not used in the translation`,
 	});
@@ -296,8 +323,10 @@ function declarationName(declaration: string): string | undefined {
 export function isEmptyValue(value: MessageValue | undefined): boolean {
 	if (value === undefined) return true;
 	if (typeof value === "string") return value.trim().length === 0;
-	const patterns = patternsOf(value);
-	return (
-		patterns.length === 0 || patterns.every((p) => p.trim().length === 0)
-	);
+	for (const spec of value) {
+		for (const pattern of Object.values(spec?.match ?? {})) {
+			if (pattern.trim().length > 0) return false;
+		}
+	}
+	return true;
 }

@@ -16,17 +16,21 @@ export function computeProjectInfo(
 	context: ProjectSnapshot
 ): ProjectInfo {
 	const { baseLocale, locales, snapshot } = context;
-	const allKeys = collectKeys(snapshot);
+	const allKeys = new Set<string>();
 
 	const translated: Record<string, number> = {};
-	const missing: Record<string, number> = {};
 	for (const locale of locales) {
 		let count = 0;
-		for (const key of allKeys) {
-			if (!isEmptyValue(snapshot[locale]?.[key])) count++;
+		for (const [key, value] of Object.entries(snapshot[locale] ?? {})) {
+			allKeys.add(key);
+			if (!isEmptyValue(value)) count++;
 		}
 		translated[locale] = count;
-		missing[locale] = allKeys.size - count;
+	}
+
+	const missing: Record<string, number> = {};
+	for (const locale of locales) {
+		missing[locale] = allKeys.size - (translated[locale] ?? 0);
 	}
 
 	return {
@@ -66,30 +70,26 @@ export function queryKeys(
 		throw new Error(`status "${status}" requires a locale`);
 	}
 
-	let keys = [...collectKeys(snapshot)].sort();
-	if (args.prefix) {
-		keys = keys.filter((key) => key.startsWith(args.prefix!));
-	}
-	if (locale && status !== "all") {
-		keys = keys.filter((key) => {
+	const limit = Math.max(1, args.limit ?? DEFAULT_LIST_KEYS_PAGE_SIZE);
+	const result = pageSortedKeys({
+		keys: collectKeys(snapshot),
+		limit,
+		after: args.after,
+		matches: (key) => {
+			if (args.prefix && !key.startsWith(args.prefix)) return false;
+			if (!locale || status === "all") return true;
 			const empty = isEmptyValue(snapshot[locale]?.[key]);
 			return status === "missing" ? empty : !empty;
-		});
-	}
-
-	const total = keys.length;
-	if (args.after) {
-		keys = keys.filter((key) => key > args.after!);
-	}
-	const limit = Math.max(1, args.limit ?? DEFAULT_LIST_KEYS_PAGE_SIZE);
-	const page = keys.slice(0, limit);
-	const hasMore = keys.length > limit;
+		},
+	});
 
 	return {
-		keys: page,
-		total,
-		hasMore,
-		nextCursor: hasMore ? page[page.length - 1] : undefined,
+		keys: result.page,
+		total: result.total,
+		hasMore: result.hasMore,
+		nextCursor: result.hasMore
+			? result.page[result.page.length - 1]
+			: undefined,
 	};
 }
 
@@ -112,31 +112,54 @@ export function queryMessages(
 	const locales = resolveLocales(args.locales, projectLocales);
 
 	let keys: string[];
+	let allKeys: Set<string> | undefined;
 	if (args.keys?.length) {
 		keys = args.keys;
 	} else {
-		keys = [...collectKeys(snapshot)]
-			.filter((key) => key.startsWith(args.prefix!))
-			.sort();
+		allKeys = collectKeys(snapshot);
+		const result = pageSortedKeys({
+			keys: allKeys,
+			limit: Math.max(1, args.limit ?? DEFAULT_GET_MESSAGES_LIMIT),
+			matches: (key) => key.startsWith(args.prefix!),
+		});
+		keys = result.page;
+		return {
+			messages: keys.map((key) => translationsForKey(snapshot, locales, key)),
+			truncated: result.hasMore,
+		};
 	}
 
 	const limit = Math.max(1, args.limit ?? DEFAULT_GET_MESSAGES_LIMIT);
 	const truncated = keys.length > limit;
 	keys = keys.slice(0, limit);
 
-	const allKeys = collectKeys(snapshot);
 	const messages = keys.map((key) => {
-		if (!allKeys.has(key)) {
+		if (!(allKeys?.has(key) ?? keyExists(snapshot, key))) {
 			return { key, translations: {} as Record<string, MessageValue | null> };
 		}
-		const translations: Record<string, MessageValue | null> = {};
-		for (const locale of locales) {
-			translations[locale] = snapshot[locale]?.[key] ?? null;
-		}
-		return { key, translations };
+		return translationsForKey(snapshot, locales, key);
 	});
 
 	return { messages, truncated };
+}
+
+function translationsForKey(
+	snapshot: ProjectSnapshot["snapshot"],
+	locales: string[],
+	key: string
+): { key: string; translations: Record<string, MessageValue | null> } {
+	const translations: Record<string, MessageValue | null> = {};
+	for (const locale of locales) {
+		translations[locale] = snapshot[locale]?.[key] ?? null;
+	}
+	return { key, translations };
+}
+
+function keyExists(snapshot: ProjectSnapshot["snapshot"], key: string): boolean {
+	for (const messages of Object.values(snapshot)) {
+		if (key in messages) return true;
+	}
+	return false;
 }
 
 /** Validates and resolves the source/target locale pair of a batch call. */
@@ -160,13 +183,41 @@ function resolveSourceTarget(
 	return { targetLocale, sourceLocale };
 }
 
-/** Sorted keys of the snapshot, optionally narrowed to a prefix. */
-function sortedKeys(context: ProjectSnapshot, prefix?: string): string[] {
-	let keys = [...collectKeys(context.snapshot)].sort();
+/** Sorted keys of one locale, optionally narrowed to a prefix. */
+function sortedLocaleKeys(
+	context: ProjectSnapshot,
+	locale: string,
+	prefix?: string
+): string[] {
+	let keys = Object.keys(context.snapshot[locale] ?? {}).sort();
 	if (prefix) {
 		keys = keys.filter((key) => key.startsWith(prefix));
 	}
 	return keys;
+}
+
+function pageSortedKeys(args: {
+	keys: Iterable<string>;
+	limit: number;
+	after?: string;
+	matches: (key: string) => boolean;
+}): { page: string[]; total: number; hasMore: boolean } {
+	const page: string[] = [];
+	let total = 0;
+	let hasMore = false;
+
+	for (const key of [...args.keys].sort()) {
+		if (!args.matches(key)) continue;
+		total++;
+		if (args.after && key <= args.after) continue;
+		if (page.length < args.limit) {
+			page.push(key);
+		} else {
+			hasMore = true;
+		}
+	}
+
+	return { page, total, hasMore };
 }
 
 function toTranslationItem(
@@ -202,24 +253,26 @@ export function nextTranslationBatch(
 } {
 	const { snapshot } = context;
 	const { targetLocale, sourceLocale } = resolveSourceTarget(context, args);
-
-	const pending = sortedKeys(context, args.prefix).filter((key) => {
-		const source = snapshot[sourceLocale]?.[key];
-		if (isEmptyValue(source)) return false;
-		return isEmptyValue(snapshot[targetLocale]?.[key]);
-	});
-
 	const batchSize = Math.max(1, args.batchSize ?? DEFAULT_TRANSLATION_BATCH_SIZE);
-	const items = pending
-		.slice(0, batchSize)
-		.map((key) => toTranslationItem(context, sourceLocale, targetLocale, key));
+	const page: string[] = [];
+	let remaining = 0;
+
+	for (const key of sortedLocaleKeys(context, sourceLocale, args.prefix)) {
+		const source = snapshot[sourceLocale]?.[key];
+		if (isEmptyValue(source)) continue;
+		if (!isEmptyValue(snapshot[targetLocale]?.[key])) continue;
+		remaining++;
+		if (page.length < batchSize) page.push(key);
+	}
 
 	return {
 		targetLocale,
 		sourceLocale,
-		items,
-		remaining: pending.length,
-		done: pending.length === 0,
+		items: page.map((key) =>
+			toTranslationItem(context, sourceLocale, targetLocale, key)
+		),
+		remaining,
+		done: remaining === 0,
 	};
 }
 
@@ -253,17 +306,21 @@ export function nextRetranslationBatch(
 } {
 	const { snapshot } = context;
 	const { targetLocale, sourceLocale } = resolveSourceTarget(context, args);
-
-	const inScope = sortedKeys(context, args.prefix).filter(
-		(key) => !isEmptyValue(snapshot[sourceLocale]?.[key])
-	);
-
-	const remaining = args.after
-		? inScope.filter((key) => key > args.after!)
-		: inScope;
 	const batchSize = Math.max(1, args.batchSize ?? DEFAULT_TRANSLATION_BATCH_SIZE);
-	const page = remaining.slice(0, batchSize);
-	const hasMore = remaining.length > batchSize;
+	const page: string[] = [];
+	let total = 0;
+	let hasMore = false;
+
+	for (const key of sortedLocaleKeys(context, sourceLocale, args.prefix)) {
+		if (isEmptyValue(snapshot[sourceLocale]?.[key])) continue;
+		total++;
+		if (args.after && key <= args.after) continue;
+		if (page.length < batchSize) {
+			page.push(key);
+		} else {
+			hasMore = true;
+		}
+	}
 
 	return {
 		targetLocale,
@@ -271,7 +328,7 @@ export function nextRetranslationBatch(
 		items: page.map((key) =>
 			toTranslationItem(context, sourceLocale, targetLocale, key)
 		),
-		total: inScope.length,
+		total,
 		hasMore,
 		nextCursor: hasMore ? page[page.length - 1] : undefined,
 	};
@@ -305,9 +362,15 @@ export function searchMessages(
 	const locales = resolveLocales(args.locales, projectLocales);
 
 	const results: SearchResult[] = [];
+	const limit = Math.max(1, args.limit ?? DEFAULT_SEARCH_MESSAGES_LIMIT);
+	let total = 0;
 
 	for (const key of [...collectKeys(snapshot)].sort()) {
 		const keyMatched = key.toLowerCase().includes(query);
+		if (keyMatched && results.length >= limit) {
+			total++;
+			continue;
+		}
 		const matches: SearchResult["matches"] = [];
 		for (const locale of locales) {
 			const value = snapshot[locale]?.[key];
@@ -320,14 +383,15 @@ export function searchMessages(
 			}
 		}
 		if (keyMatched || matches.length > 0) {
-			results.push({ key, keyMatched, matches });
+			total++;
+			if (results.length < limit) {
+				results.push({ key, keyMatched, matches });
+			}
 		}
 	}
 
-	const total = results.length;
-	const limit = Math.max(1, args.limit ?? DEFAULT_SEARCH_MESSAGES_LIMIT);
 	return {
-		results: results.slice(0, limit),
+		results,
 		total,
 		truncated: total > limit,
 	};

@@ -124,18 +124,18 @@ export function summarizeSave(
 	accepted: Record<string, MessageValue>
 ): SaveSummary {
 	const baseMessages = context.snapshot[context.baseLocale] ?? {};
-	const targetMessages = {
-		...context.snapshot[targetLocale],
-		...accepted,
-	};
-	const remainingForLocale = Object.entries(baseMessages).filter(
-		([key, source]) => {
-			if (isEmptyValue(source)) return false;
-			return isEmptyValue(targetMessages[key]);
-		}
-	).length;
+	const targetMessages = context.snapshot[targetLocale] ?? {};
+	let remainingForLocale = 0;
+	for (const [key, source] of Object.entries(baseMessages)) {
+		if (isEmptyValue(source)) continue;
+		const target = key in accepted ? accepted[key] : targetMessages[key];
+		if (isEmptyValue(target)) remainingForLocale++;
+	}
 
-	const saved = results.filter((r) => r.status === "saved").length;
+	let saved = 0;
+	for (const result of results) {
+		if (result.status === "saved") saved++;
+	}
 	return {
 		results,
 		saved,
