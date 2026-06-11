@@ -97,7 +97,7 @@ describe("corpus/medical.json", () => {
 			expect(match).not.toBeNull();
 			const [, monthName, , yearText] = match as RegExpExecArray;
 			const year = Number(yearText);
-			const month = monthNumber[monthName];
+			const month = monthNumber[monthName ?? ""] ?? 0;
 			expect(month).toBeGreaterThanOrEqual(1);
 			expect(year * 100 + month).toBeGreaterThanOrEqual(2025 * 100 + 6);
 		}

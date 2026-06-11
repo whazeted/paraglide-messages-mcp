@@ -116,9 +116,9 @@ for (const { category, expectedLicense, sourceHost, attributionPattern } of case
 				const match = (p.attribution as string).match(attributionPattern);
 				expect(match, `${p.id}: attribution '${p.attribution}' must match expected format`).not.toBeNull();
 				if (match) {
-					assertRecentDate(match[1], match[2], p.id);
+					assertRecentDate(match[1] ?? "", match[2] ?? "", p.id);
 				}
-				sources.add(p.id.split("_")[1]);
+				sources.add(p.id.split("_")[1] ?? "");
 			}
 			expect(sources.size, "at least 4 distinct sources").toBeGreaterThanOrEqual(4);
 		});
