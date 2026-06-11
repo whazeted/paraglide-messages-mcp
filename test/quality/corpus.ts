@@ -12,6 +12,12 @@ export interface CorpusParagraph {
 	id: string;
 	chars: number;
 	text: string;
+	/**
+	 * Per-paragraph provenance for multi-source categories; when absent the
+	 * file-level attribution/sourceUrl describe every paragraph.
+	 */
+	attribution?: string;
+	sourceUrl?: string;
 }
 
 /**
@@ -82,7 +88,7 @@ export function validateCorpusFile(parsed: unknown): string[] {
 	const idPattern =
 		typeof category === "string" && category.length > 0
 			? new RegExp(
-					`^${category.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}_[a-z0-9]+_\\d{3}$`
+					`^${category.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}_[a-z0-9]+(?:_[a-z0-9]+)*_\\d{3}$`
 				)
 			: null;
 
@@ -116,6 +122,18 @@ export function validateCorpusFile(parsed: unknown): string[] {
 				violations.push(`${label}.id "${id}" is a duplicate`);
 			}
 			seenIds.add(id);
+		}
+
+		for (const field of ["attribution", "sourceUrl"]) {
+			const value = paragraph[field];
+			if (
+				value !== undefined &&
+				(typeof value !== "string" || value.trim().length === 0)
+			) {
+				violations.push(
+					`${label}.${field} must be a non-empty string when present`
+				);
+			}
 		}
 
 		if (typeof text !== "string" || text.length === 0) {
