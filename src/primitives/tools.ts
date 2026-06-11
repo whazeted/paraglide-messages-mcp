@@ -223,8 +223,10 @@ export function registerTools(
 				"limited to a key prefix). Returns the source text, required placeholders, and the " +
 				"number of remaining untranslated messages. Workflow: call this, translate the items, " +
 				"save them with save_translations, then call this again until `done` is true. " +
-				"Raise batchSize for short UI strings (fewer round-trips); lower it for long, " +
-				"nuanced prose so each item gets full attention. Reads only the source and target locale " +
+				"A batch ends at batchSize messages or at a predicted-output-token budget, " +
+				"whichever comes first: prose-heavy projects automatically get smaller batches " +
+				"(each item keeps full attention) while short UI strings fill the whole batch. " +
+				"Reads only the source and target locale " +
 				"files, so per-locale agents can run in parallel without touching each other's locales.",
 			inputSchema: {
 				targetLocale: z.string().describe("locale to translate into"),
@@ -242,8 +244,20 @@ export function registerTools(
 					.min(1)
 					.optional()
 					.describe(
-						"messages per batch; omit for a sensible default — raise for " +
+						"max messages per batch; omit for a sensible default — raise for " +
 							"short strings, lower for long, nuanced prose"
+					),
+				maxOutputBudget: z
+					.number()
+					.min(0)
+					.optional()
+					.describe(
+						"predicted-output-token budget per batch; omit for a sensible " +
+							"default, pass 0 to disable and batch by count alone. The " +
+							"prediction uses the locale's measured output-length ratio once " +
+							"enough translations exist, and the source text's own token " +
+							"estimate before that. Lower it to give long messages even more " +
+							"attention"
 					),
 			},
 			outputSchema: {

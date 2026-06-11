@@ -18,10 +18,16 @@ rejected on its own instead of sinking the call.
    with any style preferences (tone, formality, terminology).
 2. Loop until `done` is true:
    a. **`get_translation_batch`** with `targetLocale` (and `prefix` if
-      scoping). Omit `batchSize` to use the default (defined in
-      `src/core/constants.ts`); raise it for short UI strings — fewer
-      round-trips — or lower it for long, nuanced prose so each item gets
-      full attention.
+      scoping). Omit `batchSize` and `maxOutputBudget` to use the defaults
+      (defined in `src/core/constants.ts`): a batch ends at `batchSize`
+      messages or at a predicted-output-token budget, whichever comes first,
+      so long prose automatically arrives in smaller batches where each item
+      gets full attention. The prediction starts from the source text's own
+      token estimate and switches to the locale's measured output-length
+      ratio once enough translations exist (threshold in
+      `src/core/constants.ts`). Raise `batchSize` for short UI strings —
+      fewer round-trips — or lower `maxOutputBudget` to shrink prose batches
+      even further (`0` disables the budget and batches by count alone).
    b. Translate each item's `source` into the target locale.
    c. **`save_translations`** with the same keys. The server validates each
       item; check `results` for per-item errors, fix only the failed items,
