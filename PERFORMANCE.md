@@ -317,15 +317,36 @@ a measured one.
 ### How to run
 
 ```
-ANTHROPIC_API_KEY=... pnpm bench:quality
+ANTHROPIC_API_KEY=... OPENAI_API_KEY=... pnpm bench:quality
 ```
 
-Without an API key the harness performs a dry run (corpus loading, batch
-construction, JSONL plumbing, analysis) with no model calls. The models are
-env-overridable: `BENCH_TRANSLATOR_MODEL` (default `claude-sonnet-4-6`)
-does the translating, `BENCH_JUDGE_MODEL` (default `claude-opus-4-8`) does
-the judging — deliberately different models, so the judge has no
-self-preference toward output it might itself have produced.
+Without API keys the harness performs a dry run (corpus loading, batch
+construction, JSONL plumbing, analysis) with no model calls. Models are
+addressed as `<provider>:<model>` specs — `anthropic:` and `openai:` are
+supported, and a bare model id means Anthropic — each gated on its own key
+(`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`). Configuration, all pre-run via
+env:
+
+- `BENCH_TRANSLATOR_MODEL` (default `claude-sonnet-4-6`) — does the
+  translating; an OpenAI translator is just
+  `BENCH_TRANSLATOR_MODEL=openai:<model>`.
+- `BENCH_JUDGE_MODELS` — comma-separated judge specs (default
+  `claude-opus-4-8`). Judges may be any mix of providers and are
+  deliberately allowed to differ from the translator: a cross-provider
+  panel (e.g. `anthropic:claude-opus-4-8,openai:<model>`) removes not just
+  self-preference but family-preference bias, and with two or more judges
+  the run reports cross-judge agreement (raw % and Cohen's kappa). A judge
+  whose provider key is missing is skipped and recorded as skipped — never
+  silently stubbed.
+- `BENCH_JUDGE_SAMPLE` (default 20) — rows MQM-judged per budget × locale
+  group, sampled evenly along the cumulative-output-token axis so head and
+  tail of every generation are represented; every judge scores the same
+  sample.
+
+Every run documents itself: the markdown report opens with a run-metadata
+block (mode, translator, judges incl. skipped ones, sample size, budgets,
+locales, cross-judge agreement) and a machine-readable
+`bench-results/<stamp>-config.json` records the same alongside the JSONL.
 
 ### The corpus
 

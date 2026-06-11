@@ -6,11 +6,21 @@ import type { TranslationInput } from "../src/core/types.js";
 import { removeFixture, type FixtureProject } from "./helpers.js";
 import { createLargeFixtureProject } from "./large-fixture.js";
 import {
+	callJudge,
+	hasKeyFor,
 	isDryRun,
+	JUDGE_MODELS,
+	parseModelSpec,
 	textOf,
 	translateBatch,
 	TRANSLATOR_MODEL,
 } from "./quality/driver.js";
+import {
+	buildMqmPrompt,
+	crossJudgeAgreement,
+	mqmScore,
+	parseMqmResponse,
+} from "./quality/judge.js";
 import { buildCorpusProject, loadCorpus } from "./quality/corpus.js";
 import {
 	aggregate,
@@ -43,6 +53,19 @@ import {
 const BUDGETS = [750, 1500, 3000, 6000, 0];
 
 const TARGET_LOCALES = ["de", "ja"];
+
+/**
+ * Rows MQM-judged per budget × locale group, stratified along the
+ * cumulative-output-token axis (the decay axis). Each active judge model
+ * scores the same sample so cross-judge agreement is computable.
+ */
+const JUDGE_SAMPLE = Math.max(
+	0,
+	Number(process.env.BENCH_JUDGE_SAMPLE ?? 20)
+);
+
+/** Concurrent judge calls; small to stay friendly to both providers. */
+const JUDGE_CONCURRENCY = 8;
 
 /** Hard stop so a save that never makes progress cannot loop forever. */
 const MAX_BATCHES_PER_LOCALE = 500;
@@ -229,9 +252,29 @@ describe("benchmark: translation quality vs output budget", () => {
 				(filePath) => parseJsonl(fs.readFileSync(filePath, "utf8")).rows
 			);
 			const metrics = tier1Metrics(rows);
+
+			// --- Tier-2: MQM judge pass over a stratified sample, one column
+			// per configured judge model (cross-provider judges supported) ---
+			const judgeRun = await judgeSampledRows(rows);
+			for (const [spec, scores] of judgeRun.scoresByJudge) {
+				metrics[`mqm(${spec})`] = (row) => scores.get(rowId(row)) ?? null;
+			}
+
 			const aggregates = aggregate(rows, metrics);
 			const reportPath = path.join(RESULTS_DIR, `${stamp}-report.md`);
-			fs.writeFileSync(reportPath, renderMarkdownReport(aggregates));
+			const metadata = renderRunMetadata({
+				stamp,
+				rows: rows.length,
+				judgeRun,
+			});
+			fs.writeFileSync(
+				reportPath,
+				`${metadata}\n${renderMarkdownReport(aggregates)}`
+			);
+			fs.writeFileSync(
+				path.join(RESULTS_DIR, `${stamp}-config.json`),
+				`${JSON.stringify(runConfig(stamp, judgeRun), null, "\t")}\n`
+			);
 			// eslint-disable-next-line no-console
 			console.log(`[bench:quality] report -> ${reportPath}`);
 			for (const group of aggregates) {
@@ -301,4 +344,187 @@ function tier1Metrics(rows: RunRow[]): Record<string, MetricFn> {
 			return Math.max(0, 1 - relative);
 		},
 	};
+}
+
+/** Stable row identity for joining judge scores back onto rows. */
+function rowId(row: RunRow): string {
+	return `${row.runId}|${row.targetLocale}|${row.key}`;
+}
+
+interface JudgeRunResult {
+	/** judge spec -> rowId -> severity-weighted MQM errors per 100 words. */
+	scoresByJudge: Map<string, Map<string, number>>;
+	/** Configured judges whose provider key is absent (documented, not run). */
+	skippedJudges: string[];
+	sampledRowCount: number;
+	/** Pairwise agreement between judges on coarse verdict labels. */
+	agreements: Array<{ judges: [string, string]; agreement: number; kappa: number }>;
+}
+
+/**
+ * Tier-2 MQM judging over a stratified sample: per budget × locale group,
+ * up to JUDGE_SAMPLE rows evenly spaced along the cumulative-output-token
+ * axis, so the head and the tail of every generation are represented. Every
+ * active judge scores the same rows — that is what makes the per-judge
+ * metric columns comparable and cross-judge agreement meaningful. Judges
+ * whose provider key is missing are skipped and reported, never stubbed:
+ * a canned score would silently poison the decay analysis.
+ */
+async function judgeSampledRows(rows: RunRow[]): Promise<JudgeRunResult> {
+	const activeJudges = JUDGE_MODELS.filter((spec) =>
+		hasKeyFor(parseModelSpec(spec).provider)
+	);
+	const skippedJudges = JUDGE_MODELS.filter(
+		(spec) => !hasKeyFor(parseModelSpec(spec).provider)
+	);
+	if (activeJudges.length === 0 || JUDGE_SAMPLE === 0) {
+		return {
+			scoresByJudge: new Map(),
+			skippedJudges,
+			sampledRowCount: 0,
+			agreements: [],
+		};
+	}
+
+	const groups = new Map<string, RunRow[]>();
+	for (const row of rows) {
+		const key = `${row.budget}|${row.targetLocale}`;
+		(groups.get(key) ?? groups.set(key, []).get(key)!).push(row);
+	}
+	const sampled: RunRow[] = [];
+	for (const group of groups.values()) {
+		const sorted = [...group].sort(
+			(a, b) =>
+				a.cumulativeOutputTokensAtEmission - b.cumulativeOutputTokensAtEmission
+		);
+		const take = Math.min(JUDGE_SAMPLE, sorted.length);
+		const picked = new Set<number>();
+		for (let i = 0; i < take; i++) {
+			picked.add(Math.floor((i * (sorted.length - 1)) / Math.max(1, take - 1)));
+		}
+		for (const index of picked) sampled.push(sorted[index]!);
+	}
+
+	const scoresByJudge = new Map<string, Map<string, number>>();
+	const labelsByJudge = new Map<string, Map<string, string>>();
+	for (const spec of activeJudges) {
+		const scores = new Map<string, number>();
+		const labels = new Map<string, string>();
+		for (let i = 0; i < sampled.length; i += JUDGE_CONCURRENCY) {
+			const chunk = sampled.slice(i, i + JUDGE_CONCURRENCY);
+			await Promise.all(
+				chunk.map(async (row) => {
+					try {
+						const raw = await callJudge(
+							buildMqmPrompt({
+								key: row.key,
+								positionInBatch: row.positionInBatch,
+								batchItemCount: row.batchItemCount,
+								sourceText: row.sourceText,
+								targetText: row.targetText,
+								targetLocale: row.targetLocale,
+								sourceChars: row.sourceChars,
+							}),
+							spec
+						);
+						const errors = parseMqmResponse(raw);
+						const words = row.sourceText.split(/\s+/).filter(Boolean).length;
+						scores.set(rowId(row), mqmScore(errors, Math.max(1, words)));
+						labels.set(rowId(row), verdictLabel(errors.map((e) => e.severity)));
+					} catch {
+						// an unparseable judge response loses one sample, not the run
+					}
+				})
+			);
+		}
+		scoresByJudge.set(spec, scores);
+		labelsByJudge.set(spec, labels);
+	}
+
+	const agreements: JudgeRunResult["agreements"] = [];
+	for (let a = 0; a < activeJudges.length; a++) {
+		for (let b = a + 1; b < activeJudges.length; b++) {
+			const labelsA = labelsByJudge.get(activeJudges[a]!)!;
+			const labelsB = labelsByJudge.get(activeJudges[b]!)!;
+			const common = [...labelsA.keys()].filter((id) => labelsB.has(id));
+			if (common.length === 0) continue;
+			const result = crossJudgeAgreement(
+				common.map((id) => labelsA.get(id)!),
+				common.map((id) => labelsB.get(id)!)
+			);
+			agreements.push({
+				judges: [activeJudges[a]!, activeJudges[b]!],
+				...result,
+			});
+		}
+	}
+
+	return {
+		scoresByJudge,
+		skippedJudges,
+		sampledRowCount: sampled.length,
+		agreements,
+	};
+}
+
+/** Coarse per-item verdict for agreement stats: clean or worst severity. */
+function verdictLabel(severities: string[]): string {
+	if (severities.includes("critical")) return "critical";
+	if (severities.includes("major")) return "major";
+	if (severities.includes("minor")) return "minor";
+	return "clean";
+}
+
+function runConfig(stamp: string, judgeRun: JudgeRunResult) {
+	return {
+		generated: stamp,
+		mode: isDryRun() ? "dry-run" : "live",
+		translatorModel: TRANSLATOR_MODEL,
+		judgeModels: JUDGE_MODELS,
+		activeJudges: [...judgeRun.scoresByJudge.keys()],
+		skippedJudges: judgeRun.skippedJudges,
+		judgeSamplePerGroup: JUDGE_SAMPLE,
+		judgedRows: judgeRun.sampledRowCount,
+		budgets: BUDGETS,
+		targetLocales: TARGET_LOCALES,
+		crossJudgeAgreement: judgeRun.agreements,
+	};
+}
+
+/**
+ * Human-readable run provenance, prepended to the markdown report so every
+ * result document records exactly which models produced and judged it.
+ */
+function renderRunMetadata(args: {
+	stamp: string;
+	rows: number;
+	judgeRun: JudgeRunResult;
+}): string {
+	const { judgeRun } = args;
+	const lines = [
+		"## Run metadata",
+		"",
+		`- generated: ${args.stamp}`,
+		`- mode: ${isDryRun() ? "dry-run (no translator key — results are NOT meaningful)" : "live"}`,
+		`- translator model: ${TRANSLATOR_MODEL}`,
+		`- judge models: ${
+			JUDGE_MODELS.map((spec) =>
+				judgeRun.skippedJudges.includes(spec)
+					? `${spec} (SKIPPED — no ${parseModelSpec(spec).provider} key)`
+					: spec
+			).join(", ") || "none"
+		}`,
+		`- judge sample: ${JUDGE_SAMPLE} rows per budget × locale (${judgeRun.sampledRowCount} judged)`,
+		`- budgets swept: ${BUDGETS.join(", ")} (0 = budget disabled)`,
+		`- target locales: ${TARGET_LOCALES.join(", ")}`,
+		`- rows: ${args.rows}`,
+	];
+	for (const { judges, agreement, kappa } of judgeRun.agreements) {
+		lines.push(
+			`- cross-judge agreement ${judges[0]} vs ${judges[1]}: ` +
+				`${(agreement * 100).toFixed(1)}% raw, kappa ${kappa.toFixed(3)}`
+		);
+	}
+	lines.push("");
+	return lines.join("\n");
 }

@@ -201,3 +201,48 @@ describe("estimateTokens / textOf", () => {
 		).toBe("one thing many things");
 	});
 });
+
+describe("parseModelSpec / provider gating", () => {
+	it("parses provider prefixes and defaults bare ids to anthropic", async () => {
+		const { parseModelSpec } = await import("./driver.js");
+		expect(parseModelSpec("openai:gpt-5")).toEqual({
+			provider: "openai",
+			model: "gpt-5",
+		});
+		expect(parseModelSpec("anthropic:claude-opus-4-8")).toEqual({
+			provider: "anthropic",
+			model: "claude-opus-4-8",
+		});
+		expect(parseModelSpec("claude-sonnet-4-6")).toEqual({
+			provider: "anthropic",
+			model: "claude-sonnet-4-6",
+		});
+		// model ids may themselves contain colons after the provider prefix
+		expect(parseModelSpec("openai:org:custom")).toEqual({
+			provider: "openai",
+			model: "org:custom",
+		});
+	});
+
+	it("gates each provider on its own key", async () => {
+		const { hasKeyFor, isDryRun } = await import("./driver.js");
+		vi.stubEnv("ANTHROPIC_API_KEY", "");
+		vi.stubEnv("OPENAI_API_KEY", "test-key");
+		expect(hasKeyFor("anthropic")).toBe(false);
+		expect(hasKeyFor("openai")).toBe(true);
+		expect(isDryRun("claude-sonnet-4-6")).toBe(true);
+		expect(isDryRun("openai:gpt-5")).toBe(false);
+		vi.unstubAllEnvs();
+	});
+
+	it("stubs the judge only when its own provider lacks a key", async () => {
+		const { callJudge, DRY_RUN_JUDGE_STUB } = await import("./driver.js");
+		vi.stubEnv("ANTHROPIC_API_KEY", "");
+		vi.stubEnv("OPENAI_API_KEY", "");
+		expect(await callJudge("prompt", "openai:gpt-5")).toBe(DRY_RUN_JUDGE_STUB);
+		expect(await callJudge("prompt", "anthropic:claude-opus-4-8")).toBe(
+			DRY_RUN_JUDGE_STUB
+		);
+		vi.unstubAllEnvs();
+	});
+});
