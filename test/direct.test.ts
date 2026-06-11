@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveDirectProject } from "../src/core/direct.js";
+import { parseDirectProject } from "../src/core/direct.js";
 import { TranslationService } from "../src/core/service.js";
 import {
 	createFixtureProject,
@@ -40,10 +40,10 @@ afterEach(() => {
 	}
 });
 
-describe("resolveDirectProject", () => {
+describe("parseDirectProject", () => {
 	it("resolves a plain message-format project", () => {
 		const f = fixture();
-		const direct = resolveDirectProject(f.projectPath);
+		const direct = parseDirectProject(f.projectPath);
 		expect(direct).not.toBeNull();
 		expect(direct!.baseLocale).toBe("en");
 		expect(direct!.locales).toEqual(["en", "de", "fr"]);
@@ -56,7 +56,7 @@ describe("resolveDirectProject", () => {
 			(s["plugin.inlang.messageFormat"] as Record<string, unknown>).pathPattern =
 				["./messages/{locale}.json"];
 		});
-		expect(resolveDirectProject(f.projectPath)).toBeNull();
+		expect(parseDirectProject(f.projectPath)).toBeNull();
 	});
 
 	it("returns null when a foreign import/export plugin module is configured", () => {
@@ -66,7 +66,7 @@ describe("resolveDirectProject", () => {
 				"https://cdn.jsdelivr.net/npm/@inlang/plugin-i18next@latest/dist/index.js",
 			];
 		});
-		expect(resolveDirectProject(f.projectPath)).toBeNull();
+		expect(parseDirectProject(f.projectPath)).toBeNull();
 	});
 
 	it("tolerates lint-rule modules", () => {
@@ -77,13 +77,15 @@ describe("resolveDirectProject", () => {
 				"https://cdn.jsdelivr.net/npm/@inlang/message-lint-rule-missing-translation@latest/dist/index.js",
 			];
 		});
-		expect(resolveDirectProject(f.projectPath)).not.toBeNull();
+		expect(parseDirectProject(f.projectPath)).not.toBeNull();
 	});
 
-	it("returns null when PARAGLIDE_MCP_FORCE_SDK is set", () => {
+	it("ignores PARAGLIDE_MCP_FORCE_SDK — the flag is storage policy, not parsing", () => {
+		// the SDK-fallback describe below covers the flag routing reads/writes
+		// through the SDK
 		const f = fixture();
 		process.env.PARAGLIDE_MCP_FORCE_SDK = "1";
-		expect(resolveDirectProject(f.projectPath)).toBeNull();
+		expect(parseDirectProject(f.projectPath)).not.toBeNull();
 	});
 });
 

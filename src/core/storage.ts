@@ -2,16 +2,11 @@ import { flatten, unflatten } from "flat";
 import type { InlangProject } from "@inlang/sdk";
 import {
 	mutateDirectLocale,
+	parseDirectProject,
 	readDirectSnapshot,
-	resolveDirectProject,
-	writeDirectLocale,
 } from "./direct.js";
 import { pickPluginKey, saveProject, withProject } from "./project.js";
-import type {
-	LocaleMessages,
-	MessagesSnapshot,
-	MessageValue,
-} from "./types.js";
+import type { LocaleMessages, MessagesSnapshot } from "./types.js";
 
 /** Everything an operation needs to know about the project, loaded fresh. */
 export interface ProjectSnapshot {
@@ -21,17 +16,10 @@ export interface ProjectSnapshot {
 	snapshot: MessagesSnapshot;
 }
 
-/** What an update decides to persist, plus the value to return to the caller. */
-export interface UpdatePlan<T> {
-	/** accepted `key -> value` changes for the target locale (may be empty) */
-	values: Record<string, MessageValue>;
-	result: T;
-}
-
 /**
- * What a key mutation decides to persist, plus the value to return to the
- * caller. Unlike UpdatePlan this spans all locales and can remove keys —
- * needed by delete/rename, which plain value merging cannot express.
+ * What a mutation decides to persist, plus the value to return to the
+ * caller. Covers every write the tools need: saves are additions to one
+ * locale, deletes are key removals across all locales, renames are both.
  */
 export interface KeyMutationPlan<T> {
 	/** keys to remove from every locale (may be empty) */
@@ -49,19 +37,11 @@ export interface KeyMutationPlan<T> {
 export interface ProjectStorage {
 	read(): Promise<ProjectSnapshot>;
 	/**
-	 * Reads the snapshot, lets `plan` decide what to write for the target
-	 * locale, persists those values, and returns the plan's result. Read and
-	 * write happen in one storage session so the SDK path loads the project
-	 * only once.
-	 */
-	update<T>(
-		targetLocale: string,
-		plan: (context: ProjectSnapshot) => UpdatePlan<T>
-	): Promise<T>;
-	/**
 	 * Reads the snapshot, lets `plan` decide which keys to remove and which
-	 * per-locale values to write, persists both, and returns the plan's result.
-	 * Used by delete/rename, which touch all locales and remove keys.
+	 * per-locale values to write, persists both, and returns the plan's
+	 * result. Read and write happen in one storage session so the SDK path
+	 * loads the project only once; the direct path rewrites only the locale
+	 * files the plan actually touches.
 	 */
 	mutateKeys<T>(
 		plan: (context: ProjectSnapshot) => KeyMutationPlan<T>
@@ -71,11 +51,14 @@ export interface ProjectStorage {
 /**
  * Picks the storage for the project: direct JSON file access for
  * message-format projects (fast — see PERFORMANCE.md and direct.ts), the
- * inlang SDK for everything else. Resolved per call, so settings changes
- * take effect immediately.
+ * inlang SDK for everything else. The `PARAGLIDE_MCP_FORCE_SDK` escape
+ * hatch forces the SDK path. Resolved per call, so settings changes take
+ * effect immediately.
  */
 export function createStorage(projectPath: string): ProjectStorage {
-	const direct = resolveDirectProject(projectPath);
+	const direct = process.env.PARAGLIDE_MCP_FORCE_SDK
+		? null
+		: parseDirectProject(projectPath);
 	if (direct) {
 		const read = async (): Promise<ProjectSnapshot> => ({
 			baseLocale: direct.baseLocale,
@@ -85,19 +68,14 @@ export function createStorage(projectPath: string): ProjectStorage {
 		});
 		return {
 			read,
-			async update(targetLocale, plan) {
-				const { values, result } = plan(await read());
-				if (Object.keys(values).length > 0) {
-					writeDirectLocale(direct, targetLocale, values);
-				}
-				return result;
-			},
 			async mutateKeys(plan) {
-				const { deletions, additions, result } = plan(await read());
+				const context = await read();
+				const { deletions, additions, result } = plan(context);
 				for (const locale of direct.locales) {
 					mutateDirectLocale(
 						direct,
 						locale,
+						context.snapshot[locale] ?? {},
 						additions[locale] ?? {},
 						deletions
 					);
@@ -112,27 +90,6 @@ export function createStorage(projectPath: string): ProjectStorage {
 	return {
 		async read() {
 			return await withProject(projectPath, read);
-		},
-		async update(targetLocale, plan) {
-			return await withProject(projectPath, async (project) => {
-				const context = await read(project);
-				const { values, result } = plan(context);
-				if (Object.keys(values).length > 0) {
-					await project.importFiles({
-						pluginKey: context.pluginKey,
-						files: [
-							{
-								locale: targetLocale,
-								content: new TextEncoder().encode(
-									JSON.stringify(unflatten(values))
-								),
-							},
-						],
-					});
-					await saveProject(project, projectPath);
-				}
-				return result;
-			});
 		},
 		async mutateKeys(plan) {
 			return await withProject(projectPath, async (project) => {

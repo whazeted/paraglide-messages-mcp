@@ -1,6 +1,7 @@
 import nodeFs from "node:fs";
 import path from "node:path";
-import { MESSAGE_FILE_SCHEMA, parseDirectProject } from "./direct.js";
+import { parseDirectProject, seedDirectLocale } from "./direct.js";
+import { unknownLocaleError } from "./queries.js";
 
 /**
  * Locale management: adding/removing entries in the `locales` array of
@@ -49,44 +50,27 @@ export function addLocale(
 		throw new Error(`locale '${tag}' is already in the project`);
 	}
 
-	settings.locales = [...locales, tag];
+	const next = [...locales, tag];
+	settings.locales = next;
 	writeSettings(settingsPath, settings);
 
 	// seed an empty message file for message-format projects so the locale is
 	// visible to the compiler and editors immediately; other plugins create
 	// their files on first save
-	let messageFileCreated = false;
-	const direct = parseDirectProject(projectPath);
-	if (direct) {
-		const filePath = direct.fileFor(tag);
-		if (!nodeFs.existsSync(filePath)) {
-			nodeFs.mkdirSync(path.dirname(filePath), { recursive: true });
-			nodeFs.writeFileSync(
-				filePath,
-				JSON.stringify({ $schema: MESSAGE_FILE_SCHEMA }, null, "\t")
-			);
-			messageFileCreated = true;
-		}
-	}
+	const direct = parseDirectProject(projectPath, settings);
+	const messageFileCreated = direct ? seedDirectLocale(direct, tag) : false;
 
-	return {
-		locale: tag,
-		locales: settings.locales as string[],
-		messageFileCreated,
-	};
+	return { locale: tag, locales: next, messageFileCreated };
 }
 
 export function removeLocale(
 	projectPath: string,
-	locale: string,
-	discardedTranslations: number
-): RemoveLocaleResult {
+	locale: string
+): Omit<RemoveLocaleResult, "discardedTranslations"> {
 	const tag = locale.trim();
 	const { settings, settingsPath, locales } = readSettings(projectPath);
 	if (!locales.includes(tag)) {
-		throw new Error(
-			`unknown locale '${tag}'. Project locales: ${locales.join(", ")}`
-		);
+		throw unknownLocaleError(tag, locales);
 	}
 	if (settings.baseLocale === tag) {
 		throw new Error(
@@ -97,7 +81,7 @@ export function removeLocale(
 	// delete the message file first (while the locale is still resolvable),
 	// then update settings
 	let messageFileDeleted = false;
-	const direct = parseDirectProject(projectPath);
+	const direct = parseDirectProject(projectPath, settings);
 	if (direct) {
 		const filePath = direct.fileFor(tag);
 		if (nodeFs.existsSync(filePath)) {
@@ -106,15 +90,11 @@ export function removeLocale(
 		}
 	}
 
-	settings.locales = locales.filter((l) => l !== tag);
+	const next = locales.filter((l) => l !== tag);
+	settings.locales = next;
 	writeSettings(settingsPath, settings);
 
-	return {
-		locale: tag,
-		locales: settings.locales as string[],
-		discardedTranslations,
-		messageFileDeleted,
-	};
+	return { locale: tag, locales: next, messageFileDeleted };
 }
 
 function readSettings(projectPath: string): {

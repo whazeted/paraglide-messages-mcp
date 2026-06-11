@@ -2,11 +2,7 @@ import nodeFs from "node:fs";
 import path from "node:path";
 import { flatten, unflatten } from "flat";
 import { MESSAGE_FORMAT_PLUGIN_KEY } from "./project.js";
-import type {
-	LocaleMessages,
-	MessagesSnapshot,
-	MessageValue,
-} from "./types.js";
+import type { LocaleMessages, MessagesSnapshot } from "./types.js";
 
 /**
  * Direct file access for inlang message-format projects.
@@ -20,8 +16,7 @@ import type {
  * a multi-file `pathPattern`) keep going through the SDK.
  */
 
-export const MESSAGE_FILE_SCHEMA =
-	"https://inlang.com/schema/inlang-message-format";
+const MESSAGE_FILE_SCHEMA = "https://inlang.com/schema/inlang-message-format";
 
 export interface DirectProject {
 	baseLocale: string;
@@ -39,34 +34,25 @@ export interface DirectProject {
  *   (a `pathPattern` array means multiple files per locale — SDK territory)
  * - no other import/export plugin module configured that could take
  *   precedence (lint-rule modules are fine)
- * - the `PARAGLIDE_MCP_FORCE_SDK` escape hatch not being set
- */
-export function resolveDirectProject(
-	projectPath: string
-): DirectProject | null {
-	if (process.env.PARAGLIDE_MCP_FORCE_SDK) {
-		return null;
-	}
-	return parseDirectProject(projectPath);
-}
-
-/**
- * Same as resolveDirectProject but without the escape-hatch check — for
- * callers that need the message file *location* regardless of whether
- * message reads/writes go through the SDK (e.g. locale management seeding
- * or deleting a locale file).
+ *
+ * Note this decides where message files *live*, not which path reads/writes
+ * them — the `PARAGLIDE_MCP_FORCE_SDK` escape hatch is storage-selection
+ * policy and lives in createStorage. Pass `settings` when the caller has
+ * already parsed settings.json to avoid a second read.
  */
 export function parseDirectProject(
-	projectPath: string
+	projectPath: string,
+	settings?: Record<string, unknown>
 ): DirectProject | null {
-	let settings: Record<string, unknown>;
-	try {
-		settings = JSON.parse(
-			nodeFs.readFileSync(path.join(projectPath, "settings.json"), "utf8")
-		);
-	} catch {
-		// unreadable settings: let the SDK produce its usual error
-		return null;
+	if (settings === undefined) {
+		try {
+			settings = JSON.parse(
+				nodeFs.readFileSync(path.join(projectPath, "settings.json"), "utf8")
+			) as Record<string, unknown>;
+		} catch {
+			// unreadable settings: let the SDK produce its usual error
+			return null;
+		}
 	}
 
 	const baseLocale = settings.baseLocale;
@@ -144,46 +130,58 @@ function readLocaleFile(filePath: string): LocaleMessages {
 	return flatten(json, { safe: true }) as LocaleMessages;
 }
 
-/**
- * Merges the accepted translations into the target locale's message file and
- * writes only that file. Output matches the message-format plugin's export:
- * `$schema` first, tab indentation, optional recursive key sort.
- */
-export function writeDirectLocale(
+/** Reads one locale's message file, flattened to `key -> value`. */
+export function readDirectLocale(
 	project: DirectProject,
-	locale: string,
-	accepted: Record<string, MessageValue>
-): void {
-	const filePath = project.fileFor(locale);
-	writeLocaleFile(project, filePath, {
-		...readLocaleFile(filePath),
-		...accepted,
-	});
+	locale: string
+): LocaleMessages {
+	return readLocaleFile(project.fileFor(locale));
 }
 
 /**
  * Removes `deletions` from and merges `additions` into one locale's message
- * file. Locale files that the mutation does not touch keep their exact byte
- * content (no rewrite).
+ * file. `current` is the locale's already-loaded messages (from the snapshot
+ * read at the start of the call) so the file is not read a second time.
+ * Locale files that the mutation does not touch keep their exact byte
+ * content (no rewrite). Output matches the message-format plugin's export:
+ * `$schema` first, tab indentation, optional recursive key sort.
  */
 export function mutateDirectLocale(
 	project: DirectProject,
 	locale: string,
+	current: LocaleMessages,
 	additions: LocaleMessages,
 	deletions: string[]
 ): void {
-	const filePath = project.fileFor(locale);
-	const messages = readLocaleFile(filePath);
-
-	const affectedDeletions = deletions.filter((key) => key in messages);
+	const affectedDeletions = deletions.filter((key) => key in current);
 	if (affectedDeletions.length === 0 && Object.keys(additions).length === 0) {
 		return;
 	}
 
+	const messages = { ...current };
 	for (const key of affectedDeletions) {
 		delete messages[key];
 	}
-	writeLocaleFile(project, filePath, { ...messages, ...additions });
+	writeLocaleFile(project, project.fileFor(locale), {
+		...messages,
+		...additions,
+	});
+}
+
+/**
+ * Creates an empty message file for a locale (just the `$schema` header), in
+ * the same format as every other write. No-op when the file already exists.
+ */
+export function seedDirectLocale(
+	project: DirectProject,
+	locale: string
+): boolean {
+	const filePath = project.fileFor(locale);
+	if (nodeFs.existsSync(filePath)) {
+		return false;
+	}
+	writeLocaleFile(project, filePath, {});
+	return true;
 }
 
 function writeLocaleFile(

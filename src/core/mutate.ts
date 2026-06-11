@@ -20,12 +20,12 @@ export type RenameSummary = {
 
 /**
  * Validates a delete batch against the current snapshot. Pure: returns the
- * per-item results plus the keys to remove from every locale.
+ * keys to remove from every locale plus the finished summary.
  */
 export function planDeleteMessages(
 	context: ProjectSnapshot,
 	keys: string[]
-): { results: DeleteResultItem[]; deletions: string[] } {
+): { deletions: string[]; summary: DeleteSummary } {
 	const allKeys = collectKeys(context.snapshot);
 
 	const results: DeleteResultItem[] = [];
@@ -57,7 +57,14 @@ export function planDeleteMessages(
 		results.push({ key, status: "deleted" });
 	}
 
-	return { results, deletions };
+	return {
+		deletions,
+		summary: {
+			results,
+			deleted: deletions.length,
+			failed: results.length - deletions.length,
+		},
+	};
 }
 
 /**

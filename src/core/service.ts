@@ -1,4 +1,5 @@
 import { MAX_SAVE_BATCH } from "./constants.js";
+import { parseDirectProject, readDirectLocale } from "./direct.js";
 import { isEmptyValue } from "./format.js";
 import {
 	addLocale,
@@ -12,6 +13,7 @@ import {
 	queryKeys,
 	queryMessages,
 	searchMessages,
+	type SearchResult,
 } from "./queries.js";
 import {
 	planDeleteMessages,
@@ -83,11 +85,7 @@ export class TranslationService {
 		locales?: string[];
 		limit?: number;
 	}): Promise<{
-		results: Array<{
-			key: string;
-			keyMatched: boolean;
-			matches: Array<{ locale: string; value: MessageValue }>;
-		}>;
+		results: SearchResult[];
 		total: number;
 		truncated: boolean;
 	}> {
@@ -125,16 +123,14 @@ export class TranslationService {
 				`max ${MAX_SAVE_BATCH} translations per call — translate in small batches to keep error rates low`
 			);
 		}
-		return await createStorage(this.projectPath).update(
-			args.targetLocale,
-			(context) => {
-				const { results, accepted } = validateBatch(context, args);
-				return {
-					values: accepted,
-					result: summarizeSave(context, args.targetLocale, results, accepted),
-				};
-			}
-		);
+		return await createStorage(this.projectPath).mutateKeys((context) => {
+			const { results, accepted } = validateBatch(context, args);
+			return {
+				deletions: [],
+				additions: { [args.targetLocale]: accepted },
+				result: summarizeSave(context, args.targetLocale, results, accepted),
+			};
+		});
 	}
 
 	async deleteMessages(args: { keys: string[] }): Promise<DeleteSummary> {
@@ -147,16 +143,8 @@ export class TranslationService {
 			);
 		}
 		return await createStorage(this.projectPath).mutateKeys((context) => {
-			const { results, deletions } = planDeleteMessages(context, args.keys);
-			return {
-				deletions,
-				additions: {},
-				result: {
-					results,
-					deleted: deletions.length,
-					failed: results.length - deletions.length,
-				},
-			};
+			const { deletions, summary } = planDeleteMessages(context, args.keys);
+			return { deletions, additions: {}, result: summary };
 		});
 	}
 
@@ -175,11 +163,16 @@ export class TranslationService {
 	}
 
 	async removeLocale(args: { locale: string }): Promise<RemoveLocaleResult> {
-		// count what is being discarded while the locale is still readable
-		const context = await createStorage(this.projectPath).read();
-		const discarded = Object.values(
-			context.snapshot[args.locale.trim()] ?? {}
-		).filter((value) => !isEmptyValue(value)).length;
-		return removeLocale(this.projectPath, args.locale, discarded);
+		// count what is being discarded while the locale is still readable —
+		// one file read when the location is known, full project read otherwise
+		const tag = args.locale.trim();
+		const direct = parseDirectProject(this.projectPath);
+		const messages = direct
+			? readDirectLocale(direct, tag)
+			: ((await createStorage(this.projectPath).read()).snapshot[tag] ?? {});
+		const discardedTranslations = Object.values(messages).filter(
+			(value) => !isEmptyValue(value)
+		).length;
+		return { ...removeLocale(this.projectPath, args.locale), discardedTranslations };
 	}
 }

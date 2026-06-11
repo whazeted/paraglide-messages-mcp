@@ -112,13 +112,7 @@ export function queryMessages(
 	truncated: boolean;
 } {
 	const { locales: projectLocales, snapshot } = context;
-
-	const locales = args.locales ?? projectLocales;
-	for (const locale of locales) {
-		if (!projectLocales.includes(locale)) {
-			throw unknownLocaleError(locale, projectLocales);
-		}
-	}
+	const locales = resolveLocales(args.locales, projectLocales);
 
 	let keys: string[];
 	if (args.keys?.length) {
@@ -217,6 +211,12 @@ export function nextTranslationBatch(
 	};
 }
 
+export type SearchResult = {
+	key: string;
+	keyMatched: boolean;
+	matches: Array<{ locale: string; value: MessageValue }>;
+};
+
 export function searchMessages(
 	context: ProjectSnapshot,
 	args: {
@@ -225,11 +225,7 @@ export function searchMessages(
 		limit?: number;
 	}
 ): {
-	results: Array<{
-		key: string;
-		keyMatched: boolean;
-		matches: Array<{ locale: string; value: MessageValue }>;
-	}>;
+	results: SearchResult[];
 	total: number;
 	truncated: boolean;
 } {
@@ -240,22 +236,13 @@ export function searchMessages(
 		throw new Error("query must not be empty");
 	}
 
-	const locales = args.locales ?? projectLocales;
-	for (const locale of locales) {
-		if (!projectLocales.includes(locale)) {
-			throw unknownLocaleError(locale, projectLocales);
-		}
-	}
+	const locales = resolveLocales(args.locales, projectLocales);
 
-	const results: Array<{
-		key: string;
-		keyMatched: boolean;
-		matches: Array<{ locale: string; value: MessageValue }>;
-	}> = [];
+	const results: SearchResult[] = [];
 
 	for (const key of [...collectKeys(snapshot)].sort()) {
 		const keyMatched = key.toLowerCase().includes(query);
-		const matches: Array<{ locale: string; value: MessageValue }> = [];
+		const matches: SearchResult["matches"] = [];
 		for (const locale of locales) {
 			const value = snapshot[locale]?.[key];
 			if (value === undefined) continue;
@@ -278,6 +265,23 @@ export function searchMessages(
 		total,
 		truncated: total > limit,
 	};
+}
+
+/**
+ * Resolves a requested locale list against the project's locales: defaults
+ * to all project locales and rejects unknown ones.
+ */
+function resolveLocales(
+	requested: string[] | undefined,
+	projectLocales: string[]
+): string[] {
+	const locales = requested ?? projectLocales;
+	for (const locale of locales) {
+		if (!projectLocales.includes(locale)) {
+			throw unknownLocaleError(locale, projectLocales);
+		}
+	}
+	return locales;
 }
 
 export function unknownLocaleError(locale: string, locales: string[]): Error {

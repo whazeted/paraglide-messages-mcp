@@ -29,6 +29,10 @@ const messageValueSchema = z.union([
 // multi-variant arrays — don't enforce the single-element rule on the way out.
 const messageValueOutputSchema = z.union([z.string(), z.array(variantSchema)]);
 
+const localesAfterChangeSchema = z
+	.array(z.string())
+	.describe("the project's locales after the change");
+
 /**
  * Registers the translation tools. They are designed for *small-batch*
  * translation: agents pull a handful of messages, translate them, save them,
@@ -396,9 +400,7 @@ export function registerTools(
 			},
 			outputSchema: {
 				locale: z.string(),
-				locales: z
-					.array(z.string())
-					.describe("the project's locales after the change"),
+				locales: localesAfterChangeSchema,
 				messageFileCreated: z
 					.boolean()
 					.describe("true when an empty message file was seeded"),
@@ -421,9 +423,7 @@ export function registerTools(
 			},
 			outputSchema: {
 				locale: z.string(),
-				locales: z
-					.array(z.string())
-					.describe("the project's locales after the change"),
+				locales: localesAfterChangeSchema,
 				discardedTranslations: z
 					.number()
 					.int()
