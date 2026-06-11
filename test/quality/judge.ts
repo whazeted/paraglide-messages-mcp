@@ -1,7 +1,7 @@
 import { mulberry32 } from "../generate-messages.js";
 
 /**
- * LLM-as-judge layer for the translation-quality benchmark.
+ * LLM-as-judge layer for output-token limit calibration.
  *
  * Everything in this module is a pure function: prompt builders, response
  * parsers, and statistics. The actual model call is injected by the caller as

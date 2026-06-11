@@ -248,3 +248,26 @@ relative — decay across output positions — because memorized corpus text
 does not vary by position, so contamination cancels out of the comparison
 even though it can never be ruled out. No measured numbers exist yet; the
 default stays 1500 until the first paid sweep says otherwise.
+
+## 16. Budget predicts full emission, not just translated text
+
+**2026-06-11 · active · refines 14**
+
+The budget's prediction counted only translatable pattern text, but quality
+decays with TOTAL generated tokens — and a translating agent emits more
+than text per item: the JSON wrapper, the echoed message key, and for
+variant messages the declarations/selectors/match scaffolding. For long
+prose the envelope is a rounding error; for a batch of 50 short UI strings
+it can approach half the real emission, so text-only prediction
+systematically under-budgeted exactly those batches. It also meant the
+benchmark (which measures exact billed tokens, envelope included) and the
+server (which budgeted text tokens) used different units — a calibrated
+default would have carried a hidden ~10–30% margin.
+
+`predictOutputTokens` now adds `emissionOverheadTokens`: a constant for the
+JSON wrapper, the key's estimated tokens, and the serialized-minus-text
+chars of variant structures. The calibrated coefficient stays text-vs-text
+(stored translations contain no envelope), so the overhead term never
+double-counts. The benchmark driver uses the same estimator for dry-run
+totals and for apportioning exact call totals across items, so both sides
+of the system now account in the same unit: real emitted tokens.

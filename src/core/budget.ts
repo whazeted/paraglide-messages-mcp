@@ -24,24 +24,63 @@ export function textOf(value: MessageValue): string {
 }
 
 /**
- * Predicted output tokens for translating one source message.
+ * Tokens of the per-item JSON wrapper a translating agent emits around each
+ * translation ( `{"key": "...", "value": "..."}` — braces, quotes, field
+ * names, comma). A constant because the wrapper is the same for every item.
+ */
+const ITEM_WRAPPER_TOKENS = 10;
+
+/**
+ * Estimated tokens of the structural emission for one item beyond its
+ * translated text: the echoed message key, the JSON wrapper, and — for
+ * variant messages — the declarations/selectors/match scaffolding the agent
+ * must reproduce. Measured from the serialized value minus its pattern text,
+ * so a heavily-structured plural message is budgeted for what emitting it
+ * actually costs. Quality decays with TOTAL generated tokens, and for short
+ * UI strings this envelope can approach half the real emission — text-only
+ * prediction would systematically under-budget exactly those batches.
+ */
+export function emissionOverheadTokens(
+	key: string,
+	source: MessageValue
+): number {
+	let overhead = ITEM_WRAPPER_TOKENS + estimateTokens(key);
+	if (typeof source !== "string") {
+		const structuralChars = Math.max(
+			0,
+			JSON.stringify(source).length - textOf(source).length
+		);
+		// JSON scaffolding is ASCII: ~4 chars per token
+		overhead += structuralChars * 0.25;
+	}
+	return overhead;
+}
+
+/**
+ * Predicted output tokens for translating one source message — the full
+ * emission, not just the translated text: structural overhead (key, JSON
+ * wrapper, variant scaffolding) plus the predicted text tokens.
  *
- * With a calibrated coefficient (the locale pair's measured output-tokens-
- * per-source-char ratio), the prediction scales the source length by it.
- * Before calibration, the source text's own estimated tokens serve as the
- * floor: translations are rarely shorter than their source in token terms,
- * so this under-estimates conservatively — it is measured from data in hand,
- * not guessed from the locale tag — and keeps a fresh prose-heavy locale
- * from shipping giant batches before calibration can ever happen.
+ * For the text component: with a calibrated coefficient (the locale pair's
+ * measured output-tokens-per-source-char ratio), the prediction scales the
+ * source length by it. Before calibration, the source text's own estimated
+ * tokens serve as the floor: translations are rarely shorter than their
+ * source in token terms, so this under-estimates conservatively — it is
+ * measured from data in hand, not guessed from the locale tag — and keeps a
+ * fresh prose-heavy locale from shipping giant batches before calibration
+ * can ever happen. The calibrated coefficient is text-vs-text (stored
+ * translations contain no envelope), so adding the overhead here never
+ * double-counts it.
  */
 export function predictOutputTokens(
+	key: string,
 	source: MessageValue,
 	coefficient: number | null
 ): number {
 	const text = textOf(source);
-	return coefficient === null
-		? estimateTokens(text)
-		: coefficient * text.length;
+	const textTokens =
+		coefficient === null ? estimateTokens(text) : coefficient * text.length;
+	return textTokens + emissionOverheadTokens(key, source);
 }
 
 /**

@@ -1,5 +1,5 @@
 /**
- * Analysis / reporting layer for the translation-quality benchmark.
+ * Analysis / reporting layer for output-token limit calibration.
  *
  * Consumes the instrumented runner's JSONL output (one row per translated
  * item) and turns it into per-budget decay tables and a detected decay
@@ -360,20 +360,93 @@ function renderBucketTable(
 	return lines;
 }
 
+function describeMetric(name: string): string {
+	if (name === "validationFailure") {
+		return "Server-side validation failure rate. Goal: catch unusable translations, especially placeholder or message-shape breakage.";
+	}
+	if (name === "copyThrough") {
+		return "Source text copied into the target after case/whitespace normalization. Goal: catch untranslated give-up behavior.";
+	}
+	if (name === "terseness") {
+		return "Shortfall from the budget/locale group's median target/source length ratio. Goal: catch tail items becoming systematically too short.";
+	}
+	if (name === "repetition") {
+		return "Repeated target n-grams within an item or reused target skeletons across adjacent items. Goal: catch self-conditioning and looping.";
+	}
+	if (name === "summarizationOutlier") {
+		return "Target/source length ratio far below the locale median. Goal: catch translation collapsing into summary.";
+	}
+	if (name.startsWith("mqm(")) {
+		return "Blind LLM MQM score: severity-weighted translation errors per 100 source words. Goal: catch semantic and fluency defects mechanical metrics miss.";
+	}
+	return "Custom error-style metric supplied by the benchmark runner. Goal: catch degradation where higher scores are worse.";
+}
+
+function renderMetricGuide(metricNames: string[]): string[] {
+	const lines: string[] = [];
+	lines.push("## Metrics and goals");
+	lines.push("");
+	lines.push("| metric | goal |");
+	lines.push("| --- | --- |");
+	for (const name of metricNames) {
+		lines.push(`| \`${name}\` | ${describeMetric(name)} |`);
+	}
+	lines.push("");
+	return lines;
+}
+
+function renderMethodologyGuide(): string[] {
+	return [
+		"## Why this methodology is reliable",
+		"",
+		"| control | why it helps |",
+		"| --- | --- |",
+		"| Deterministic Tier 1 metrics | Computed from saved JSONL rows, so they do not depend on judge preference or prompt phrasing. |",
+		"| Error-style scoring | Higher always means worse, which makes onset detection consistent across mechanical and judge-backed signals. |",
+		"| Position and token-band axes | Measures where output quality degrades over generation length rather than judging absolute translation taste. |",
+		"| Relative onset threshold | Compares tail buckets to the head buckets' noise floor, so one-off bad rows do not automatically mark a budget unsafe. |",
+		"| Blind LLM judges | Judge prompts hide batch position, token budget, and the decay hypothesis; judge scores are only used when reliability gates pass. |",
+		"| Randomized pairwise order | Head-vs-tail judging randomizes A/B order, then unshuffles verdicts to expose judge position bias. |",
+		"",
+	];
+}
+
+function renderOnsetSummary(group: GroupAggregate, metricNames: string[]): string[] {
+	const lines: string[] = [];
+	lines.push("#### Onset summary");
+	lines.push("");
+	lines.push("| metric | token-band onset | status |");
+	lines.push("| --- | --- | --- |");
+	for (const name of metricNames) {
+		const onset = decayOnset(group.tokenBandBuckets, name);
+		lines.push(
+			`| ${name} | ${onset?.label ?? "—"} | ${
+				onset === null ? "no onset detected" : "decay detected"
+			} |`,
+		);
+	}
+	lines.push("");
+	return lines;
+}
+
 /**
  * Render the aggregates as a Markdown report: one section per budget ×
- * locale group with a bucket × metric table for each decay axis, then a
- * per-budget summary line with the detected onset for each metric (the
+ * locale group with a bucket × metric table for each decay axis, plus a
+ * per-budget summary table with the detected onset for each metric (the
  * token-band axis is the one the budget constant actually limits, so onsets
  * are reported on that axis).
  */
 export function renderMarkdownReport(aggregates: GroupAggregate[]): string {
 	const metricNames = metricNamesOf(aggregates);
 	const lines: string[] = [];
-	lines.push("# Translation-quality decay report");
+	lines.push("# Output-token limit calibration report");
+	lines.push("");
+	lines.push(...renderMetricGuide(metricNames));
+	lines.push(...renderMethodologyGuide());
+	lines.push("## Results");
 	lines.push("");
 	for (const group of aggregates) {
-		lines.push(`## Budget ${group.budget} · locale ${group.targetLocale}`);
+		lines.push(`### Budget ${group.budget} · locale ${group.targetLocale}`);
 		lines.push("");
 		lines.push(
 			...renderBucketTable(
@@ -391,12 +464,7 @@ export function renderMarkdownReport(aggregates: GroupAggregate[]): string {
 				metricNames,
 			),
 		);
-		const onsets = metricNames.map((name) => {
-			const onset = decayOnset(group.tokenBandBuckets, name);
-			return `${name}: ${onset === null ? "no onset detected" : `onset at ${onset.label} tokens`}`;
-		});
-		lines.push(`**Summary (budget ${group.budget}, ${group.targetLocale})** — ${onsets.join("; ")}`);
-		lines.push("");
+		lines.push(...renderOnsetSummary(group, metricNames));
 	}
 	return lines.join("\n");
 }

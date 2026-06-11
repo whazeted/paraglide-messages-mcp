@@ -1,11 +1,14 @@
-import { estimateTokens } from "../../src/core/budget.js";
+import {
+	emissionOverheadTokens,
+	estimateTokens,
+} from "../../src/core/budget.js";
 import type { MessageValue } from "../../src/core/types.js";
 import { pseudoTranslate } from "../large-fixture.js";
 
-export { estimateTokens };
+export { emissionOverheadTokens, estimateTokens };
 
 /**
- * LLM call layer for the translation-quality benchmark.
+ * LLM call layer for output-token limit calibration.
  *
  * Everything network-bound lives here so the benchmark sweep
  * (test/benchmark-quality.test.ts) and the judge module can stay pure
@@ -273,10 +276,12 @@ function buildTranslationPrompt(
  *
  * Per-item token attribution: the call reports only one exact
  * `usage.output_tokens`, so each item's share is apportioned proportionally
- * to estimateTokens(textOf(item value)) — the same estimator the server-side
- * budget logic uses — and `cumulativeOutputTokensAtEmission` is the running
- * sum in emission (item) order. That cumulative position is the x-axis of
- * the quality-decay analysis.
+ * to its predicted FULL emission — text estimate plus the structural
+ * envelope (key echo, JSON wrapper, variant scaffolding) via the same
+ * estimators the server-side budget logic uses. Weighting by text alone
+ * would smear the fixed per-item envelope toward long items and understate
+ * short ones. `cumulativeOutputTokensAtEmission` is the running sum in
+ * emission (item) order — the x-axis of the output-token limit analysis.
  */
 export async function translateBatch(args: {
 	items: BatchItem[];
@@ -302,13 +307,17 @@ export async function translateBatch(args: {
 			])
 		);
 		// Synthesize the "call total" from the same estimator used for the
-		// per-item weights, so dry-run rows are internally consistent.
+		// per-item weights (text + structural envelope), so dry-run rows are
+		// internally consistent and mirror what a live call would bill.
 		totalOutputTokens = Math.round(
-			args.items.reduce(
-				(sum, item) =>
-					sum + estimateTokens(textOf(values.get(item.key) ?? item.source)),
-				0
-			)
+			args.items.reduce((sum, item) => {
+				const value = values.get(item.key) ?? item.source;
+				return (
+					sum +
+					estimateTokens(textOf(value)) +
+					emissionOverheadTokens(item.key, value)
+				);
+			}, 0)
 		);
 	} else {
 		dryRun = false;
@@ -331,7 +340,11 @@ export async function translateBatch(args: {
 		value: values.get(item.key) ?? item.source,
 	}));
 	const { perItem, cumulative } = apportionTokens(
-		resolved.map((item) => estimateTokens(textOf(item.value))),
+		resolved.map(
+			(item) =>
+				estimateTokens(textOf(item.value)) +
+				emissionOverheadTokens(item.key, item.value)
+		),
 		totalOutputTokens
 	);
 	return {

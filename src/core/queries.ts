@@ -196,7 +196,7 @@ export function nextTranslationBatch(
 	for (const key of pending) {
 		if (items.length >= batchSize) break;
 		const source = snapshot[sourceLocale]![key]!;
-		const predicted = predictOutputTokens(source, coefficient);
+		const predicted = predictOutputTokens(key, source, coefficient);
 		// the budget can only end a batch, never empty it — a single message
 		// over budget still ships alone so the loop always makes progress
 		if (budget > 0 && items.length > 0 && predictedTokens + predicted > budget) {

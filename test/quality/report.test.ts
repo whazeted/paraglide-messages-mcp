@@ -141,7 +141,7 @@ describe("decayOnset", () => {
 });
 
 describe("renderMarkdownReport", () => {
-	it("renders per-group tables and onset summary lines", () => {
+	it("renders metric/methodology guidance plus per-group result tables", () => {
 		const rows: RunRow[] = [];
 		for (let pos = 0; pos < 20; pos++) {
 			rows.push(
@@ -155,14 +155,22 @@ describe("renderMarkdownReport", () => {
 		const report = renderMarkdownReport(
 			aggregate(rows, { score }, { positionBucketSize: 5, tokenBandSize: 250 }),
 		);
-		expect(report).toContain("# Translation-quality decay report");
-		expect(report).toContain("## Budget 1500 · locale de");
+		expect(report).toContain("# Output-token limit calibration report");
+		expect(report).toContain("## Metrics and goals");
+		expect(report).toContain("| metric | goal |");
+		expect(report).toContain("| `score` | Custom error-style metric");
+		expect(report).toContain("## Why this methodology is reliable");
+		expect(report).toContain("| control | why it helps |");
+		expect(report).toContain("| Deterministic Tier 1 metrics |");
+		expect(report).toContain("## Results");
+		expect(report).toContain("### Budget 1500 · locale de");
 		expect(report).toContain("#### By position in batch");
 		expect(report).toContain("#### By cumulative output tokens");
 		expect(report).toContain("| position | n | score (mean ± sd) |");
 		expect(report).toContain("| tokens | n | score (mean ± sd) |");
-		expect(report).toContain("**Summary (budget 1500, de)**");
-		expect(report).toContain("onset at");
+		expect(report).toContain("#### Onset summary");
+		expect(report).toContain("| metric | token-band onset | status |");
+		expect(report).toContain("| score | 3000–3249 | decay detected |");
 	});
 
 	it("reports 'no onset detected' on flat data", () => {
@@ -170,7 +178,7 @@ describe("renderMarkdownReport", () => {
 			makeRow({ positionInBatch: pos, cumulativeOutputTokensAtEmission: pos * 250 }),
 		);
 		const report = renderMarkdownReport(aggregate(rows, { score }));
-		expect(report).toContain("no onset detected");
+		expect(report).toContain("| score | — | no onset detected |");
 	});
 
 	it("is deterministic", () => {

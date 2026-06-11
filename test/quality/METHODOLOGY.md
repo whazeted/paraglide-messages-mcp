@@ -1,10 +1,10 @@
-# Translation Quality Calibration Methodology
+# Output-token Limit Calibration Methodology
 
-This benchmark calibrates a safe output-token budget for translation batches.
-The value is model-specific: each translator model can keep quality stable for a
-different amount of generated text, so the suite sweeps budgets and recommends
-the largest nonzero budget whose quality does not decay across locales and
-metrics.
+This benchmark establishes the output-token limit a translation model can
+sustain before output quality degrades. The value is model-specific: each
+translator model can keep quality stable for a different amount of generated
+text, so the suite sweeps budgets and recommends the largest nonzero budget
+whose quality does not decay across locales and metrics.
 
 ## Workflow
 
@@ -32,7 +32,7 @@ Each live run records:
 - Tier 1 mechanical metrics on every row
 - Tier 2 MQM scores only when judge reliability gates pass
 - Tier 3 blind pairwise head-vs-tail results
-- gate statuses, metric onsets, admissibility, and the recommended default
+- gate statuses, metric onsets, admissibility, and the recommended output-token limit
 
 ## Metric Tiers
 
@@ -45,7 +45,7 @@ counts, or the decay hypothesis.
 
 Tier 3 compares head-of-generation and tail-of-generation items blindly. A/B
 presentation order is randomized and later unshuffled so pairwise results can
-detect both quality decay and judge position bias.
+detect both output quality degradation and judge position bias.
 
 ## Admissibility Gates
 

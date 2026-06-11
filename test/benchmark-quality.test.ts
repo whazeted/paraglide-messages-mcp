@@ -50,16 +50,17 @@ import {
 } from "./quality/calibration.js";
 
 /**
- * Instrumented translation sweep for measuring where LLM translation quality
- * decays with output length, to calibrate DEFAULT_OUTPUT_TOKEN_BUDGET.
+ * Instrumented translation sweep for establishing the output-token limit a
+ * model can sustain before translation quality degrades, used to calibrate
+ * DEFAULT_OUTPUT_TOKEN_BUDGET.
  *
  * For each output-token budget the sweep runs the standard agent loop
  * (getTranslationBatch -> translateBatch -> saveTranslations) over fresh
  * projects for two target locales, and writes one JSONL row per translated
  * item to test/quality/reports/<run-id>.jsonl. The sweep then scores the rows
  * with mechanical metrics and reliability-gated LLM judges, writes
- * test/quality/reports/<stamp>-report.md, and prints the detected decay onset
- * per budget — the token dropoff the run exists to find.
+ * test/quality/reports/<stamp>-report.md, and prints the detected quality
+ * degradation onset per budget — the output-token limit the run exists to find.
  *
  * Excluded from `pnpm test` by the existing `test/benchmark*.test.ts`
  * pattern; run via `pnpm bench:quality`. Without a translator key the whole
@@ -192,7 +193,7 @@ async function sweepLocale(args: {
 	return rows;
 }
 
-describe("benchmark: translation quality vs output budget", () => {
+describe("benchmark: output-token limit calibration", () => {
 	it(
 		"sweeps budgets and writes per-item JSONL rows",
 		async () => {
@@ -310,7 +311,10 @@ describe("benchmark: translation quality vs output budget", () => {
 			});
 			fs.writeFileSync(
 				reportPath,
-				`${metadata}\n${renderMarkdownReport(aggregates)}`
+				renderMarkdownReport(aggregates).replace(
+					"# Output-token limit calibration report\n\n",
+					`# Output-token limit calibration report\n\n${metadata}`
+				)
 			);
 			fs.writeFileSync(
 				path.join(RESULTS_DIR, `${stamp}-config.json`),
@@ -691,38 +695,53 @@ function renderRunMetadata(args: {
 	recommendation: ReturnType<typeof recommendDefault>;
 }): string {
 	const { gateEvaluation, judgeRun, recommendation } = args;
+	const judgeModels =
+		JUDGE_MODELS.map((spec) =>
+			judgeRun.skippedJudges.includes(spec)
+				? `${spec} (skipped: no ${parseModelSpec(spec).provider} key)`
+				: spec
+		).join(", ") || "none";
+	const recommendedDefault =
+		recommendation.recommendedDefault === null
+			? `none (${recommendation.reason})`
+			: `${recommendation.recommendedDefault} output tokens`;
 	const lines = [
 		"## Run metadata",
 		"",
-		`- generated: ${args.stamp}`,
-		`- mode: ${isDryRun() ? "dry-run (no translator key — results are NOT meaningful)" : "live"}`,
-		`- translator model: ${TRANSLATOR_MODEL}`,
-		`- judge models: ${
-			JUDGE_MODELS.map((spec) =>
-				judgeRun.skippedJudges.includes(spec)
-					? `${spec} (SKIPPED — no ${parseModelSpec(spec).provider} key)`
-					: spec
-			).join(", ") || "none"
-		}`,
-		`- judge sample: ${JUDGE_SAMPLE} rows per budget × locale (${judgeRun.sampledRowCount} judged)`,
-		`- budgets swept: ${BUDGETS.join(", ")} (0 = budget disabled)`,
-		`- target locales: ${TARGET_LOCALES.join(", ")}`,
-		`- rows: ${args.rows}`,
-		`- admissible: ${gateEvaluation.admissible}`,
-		`- recommended default: ${
-			recommendation.recommendedDefault === null
-				? `none (${recommendation.reason})`
-				: `${recommendation.recommendedDefault} output tokens`
-		}`,
+		"| field | value |",
+		"| --- | --- |",
+		`| generated | ${args.stamp} |`,
+		`| mode | ${isDryRun() ? "dry-run (no translator key; results are not meaningful)" : "live"} |`,
+		`| translator model | ${TRANSLATOR_MODEL} |`,
+		`| judge models | ${judgeModels} |`,
+		`| judge sample | ${JUDGE_SAMPLE} rows per budget x locale (${judgeRun.sampledRowCount} judged) |`,
+		`| budgets swept | ${BUDGETS.join(", ")} (0 = budget disabled) |`,
+		`| target locales | ${TARGET_LOCALES.join(", ")} |`,
+		`| rows | ${args.rows} |`,
+		`| admissible | ${gateEvaluation.admissible} |`,
+		`| recommended output-token limit | ${recommendedDefault} |`,
+		"",
+		"### Gates",
+		"",
+		"| gate | status | detail |",
+		"| --- | --- | --- |",
 	];
 	for (const [name, gate] of Object.entries(gateEvaluation.gates)) {
-		lines.push(`- gate ${name}: ${gate.status} — ${gate.detail}`);
+		lines.push(`| ${name} | ${gate.status} | ${gate.detail} |`);
 	}
-	for (const { judges, agreement, kappa } of judgeRun.agreements) {
-		lines.push(
-			`- cross-judge agreement ${judges[0]} vs ${judges[1]}: ` +
-				`${(agreement * 100).toFixed(1)}% raw, kappa ${kappa.toFixed(3)}`
-		);
+	if (judgeRun.agreements.length > 0) {
+		lines.push("");
+		lines.push("### Cross-judge agreement");
+		lines.push("");
+		lines.push("| judges | raw agreement | kappa |");
+		lines.push("| --- | --- | --- |");
+		for (const { judges, agreement, kappa } of judgeRun.agreements) {
+			lines.push(
+				`| ${judges[0]} vs ${judges[1]} | ${(agreement * 100).toFixed(
+					1
+				)}% | ${kappa.toFixed(3)} |`
+			);
+		}
 	}
 	lines.push("");
 	return lines.join("\n");

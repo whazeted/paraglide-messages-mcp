@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+	emissionOverheadTokens,
 	estimateTokens,
 	outputTokensPerSourceChar,
+	predictOutputTokens,
 } from "../src/core/budget.js";
 import {
 	DEFAULT_OUTPUT_TOKEN_BUDGET,
@@ -35,6 +37,34 @@ describe("estimateTokens", () => {
 		const cjk = estimateTokens("語".repeat(100));
 		expect(cyrillic).toBeGreaterThan(latin);
 		expect(cyrillic).toBeLessThan(cjk);
+	});
+});
+
+describe("emissionOverheadTokens", () => {
+	it("charges the JSON wrapper plus the echoed key for simple strings", () => {
+		const overhead = emissionOverheadTokens("checkout_title", "Checkout");
+		expect(overhead).toBeCloseTo(10 + estimateTokens("checkout_title"));
+	});
+
+	it("charges variant scaffolding beyond the pattern text", () => {
+		const variant = [
+			{
+				declarations: ["input count", "local p = count: plural"],
+				selectors: ["p"],
+				match: { "p=one": "One item", "p=other": "Many items" },
+			},
+		];
+		const simple = emissionOverheadTokens("inbox_count", "One item Many items");
+		const complex = emissionOverheadTokens("inbox_count", variant);
+		expect(complex).toBeGreaterThan(simple);
+	});
+
+	it("makes the full prediction exceed the bare text estimate", () => {
+		const text = "x".repeat(1000);
+		expect(predictOutputTokens("k_001", text, null)).toBeGreaterThan(
+			estimateTokens(text)
+		);
+		expect(predictOutputTokens("k_001", text, 0.5)).toBeGreaterThan(500);
 	});
 });
 
@@ -137,17 +167,20 @@ describe("get_translation_batch output budget", () => {
 	});
 
 	it("maxOutputBudget is effective before calibration, not a no-op", () => {
-		// 1000 Latin chars × 0.25 = 250 estimated tokens per item
+		// per item: 1000 Latin chars × 0.25 text tokens + structural envelope
+		const perItem = predictOutputTokens("prose_000", "x".repeat(1000), null);
 		const service = scaffoldUncalibrated(proseMessages(20, 1000));
 		const defaultBatch = service.getTranslationBatch({ targetLocale: "xx" });
 		expect(defaultBatch.items).toHaveLength(
-			Math.floor(DEFAULT_OUTPUT_TOKEN_BUDGET / 250)
+			Math.floor(DEFAULT_OUTPUT_TOKEN_BUDGET / perItem)
 		);
 		const lowered = service.getTranslationBatch({
 			targetLocale: "xx",
 			maxOutputBudget: 500,
 		});
-		expect(lowered.items).toHaveLength(2);
+		expect(lowered.items).toHaveLength(
+			Math.max(1, Math.floor(500 / perItem))
+		);
 	});
 
 	it("short strings fill the full batch size (count binds, not budget)", () => {
@@ -157,11 +190,16 @@ describe("get_translation_batch output budget", () => {
 	});
 
 	it("long prose is cut by the budget once calibrated", () => {
-		// 1000 source chars × measured 0.5 = 500 predicted tokens per item
+		// per item: 1000 source chars × measured 0.5 text tokens + envelope
+		const perItem = predictOutputTokens(
+			"zz_pending_000",
+			"x".repeat(1000),
+			0.5
+		);
 		const service = scaffoldCalibrated(pendingProse(20, 1000));
 		const batch = service.getTranslationBatch({ targetLocale: "xx" });
 		expect(batch.items).toHaveLength(
-			Math.floor(DEFAULT_OUTPUT_TOKEN_BUDGET / 500)
+			Math.floor(DEFAULT_OUTPUT_TOKEN_BUDGET / perItem)
 		);
 		expect(batch.remaining).toBe(20);
 	});

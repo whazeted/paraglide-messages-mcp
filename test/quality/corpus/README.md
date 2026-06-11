@@ -1,9 +1,9 @@
-# Translation-quality benchmark corpus
+# Output-token limit calibration corpus
 
-This directory holds the prose corpus used by the translation-quality
-benchmark (`test/quality/`): one JSON file per category, each containing
-exactly 10 paragraphs. The corpus exists to measure where translation
-quality decays with output length, so that
+This directory holds the prose corpus used by the output-token limit
+calibration benchmark (`test/quality/`): one JSON file per category,
+each containing exactly 10 paragraphs. The corpus exists to establish
+where output quality degrades with generation length, so that
 `DEFAULT_OUTPUT_TOKEN_BUDGET` in `src/core/constants.ts` can be
 calibrated empirically rather than guessed.
 
