@@ -94,11 +94,11 @@ workflow, plural-rule handling, and error recovery.
 
 ```sh
 # Claude Code (plugin bundles the MCP server + skill, no .mcp.json needed)
-/plugin marketplace add WesHaze/paraglide-mcp
-/plugin install paraglide-translation@paraglide-mcp
+/plugin marketplace add whazeted/paraglide-messages-mcp
+/plugin install paraglide-translation@paraglide-messages-mcp
 
 # any other agent, via the skills CLI
-npx skills add WesHaze/paraglide-mcp
+npx skills add whazeted/paraglide-messages-mcp
 ```
 
 ## Compatibility

@@ -1,9 +1,9 @@
 {
 	"$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-	"name": "io.github.weshaze/paraglide-messages-mcp",
+	"name": "io.github.whazeted/paraglide-messages-mcp",
 	"description": "Validated, sub-agent per-locale translation of Paraglide JS / inlang message-format projects.",
 	"repository": {
-		"url": "https://github.com/WesHaze/paraglide-mcp",
+		"url": "https://github.com/whazeted/paraglide-messages-mcp",
 		"source": "github"
 	},
 	"version": "0.1.0",

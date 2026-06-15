@@ -3,10 +3,10 @@
 	"version": "0.1.0",
 	"description": "MCP server for translating Paraglide JS / inlang projects in validated per-locale batches — built for one agent per locale in parallel",
 	"license": "MIT",
-	"mcpName": "io.github.weshaze/paraglide-messages-mcp",
+	"mcpName": "io.github.whazeted/paraglide-messages-mcp",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/WesHaze/paraglide-mcp.git"
+		"url": "git+https://github.com/whazeted/paraglide-messages-mcp.git"
 	},
 	"publishConfig": {
 		"access": "public",
@@ -18,7 +18,7 @@
 		"node": ">=20.0.0"
 	},
 	"bin": {
-		"paraglide-messages-mcp": "./dist/cli.js"
+		"paraglide-messages-mcp": "dist/cli.js"
 	},
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",

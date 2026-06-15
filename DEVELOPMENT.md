@@ -179,7 +179,7 @@ One-time setup before the first tagged release:
 1. Publish the first version locally (`pnpm build && npm publish`) — npm only
    lets you configure a trusted publisher for a package that already exists.
 2. On npmjs.com → package → Settings, add a GitHub Actions trusted publisher:
-   org `WesHaze`, repository `paraglide-mcp`, workflow filename
+   org `whazeted`, repository `paraglide-messages-mcp`, workflow filename
    `release.yml`.
 3. Set publishing access to "Require two-factor authentication and disallow
    tokens".
