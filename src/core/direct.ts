@@ -20,8 +20,13 @@ const MESSAGE_FILE_SCHEMA = "https://inlang.com/schema/inlang-message-format";
 const UNSUPPORTED_PROJECT =
 	"paraglide-messages-mcp only supports inlang message-format projects: settings.json " +
 	`must configure "${MESSAGE_FORMAT_PLUGIN_KEY}" with a single string ` +
-	'pathPattern containing "{locale}", and no other import/export plugin ' +
+	'pathPattern containing "{locale}", and no unsupported import/export plugin ' +
 	"module. See COMPATIBILITY.md.";
+
+const SUPPORTED_PLUGIN_MODULES = [
+	"plugin-message-format",
+	"plugin-m-function-matcher",
+] as const;
 
 export interface DirectProject {
 	baseLocale: string;
@@ -57,8 +62,8 @@ const fileCache = new Map<string, CacheEntry>();
  *
  * - `plugin.inlang.messageFormat` settings with a single string `pathPattern`
  *   (a `pathPattern` array means multiple files per locale — unsupported)
- * - no other import/export plugin module configured that could take
- *   precedence (lint-rule modules are fine)
+ * - no other unsupported import/export plugin module configured that could
+ *   take precedence (`plugin-m-function-matcher` and lint-rule modules are fine)
  *
  * Pass `settings` when the caller has already parsed settings.json to avoid
  * a second read.
@@ -100,11 +105,15 @@ export function parseDirectProject(
 		throw new Error(UNSUPPORTED_PROJECT);
 	}
 
-	// another plugin module would be the preferred import/export plugin —
-	// without the SDK that cannot be honored, so reject instead of guessing
+	// Another import/export plugin module would be the preferred storage backend.
+	// Without the SDK that cannot be honored, so reject instead of guessing.
+	// `plugin-m-function-matcher` is a companion matcher for message functions
+	// and does not change where message-format JSON files are read or written.
 	const modules = (settings.modules ?? []) as string[];
 	const foreignPlugin = modules.some(
-		(m) => m.includes("plugin-") && !m.includes("plugin-message-format")
+		(m) =>
+			m.includes("plugin-") &&
+			!SUPPORTED_PLUGIN_MODULES.some((supported) => m.includes(supported))
 	);
 	if (foreignPlugin) {
 		throw new Error(UNSUPPORTED_PROJECT);

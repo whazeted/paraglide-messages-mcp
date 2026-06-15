@@ -6,12 +6,12 @@
 		"url": "https://github.com/whazeted/paraglide-messages-mcp",
 		"source": "github"
 	},
-	"version": "0.2.1",
+	"version": "0.2.2",
 	"packages": [
 		{
 			"registryType": "npm",
 			"identifier": "paraglide-messages-mcp",
-			"version": "0.2.1",
+			"version": "0.2.2",
 			"transport": { "type": "stdio" }
 		}
 	]

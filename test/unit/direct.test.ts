@@ -72,6 +72,17 @@ describe("parseDirectProject", () => {
 		);
 	});
 
+	it("tolerates the m-function-matcher companion plugin", () => {
+		const f = fixture();
+		patchSettings(f, (s) => {
+			s.modules = [
+				"https://cdn.jsdelivr.net/npm/@inlang/plugin-message-format@4/dist/index.js",
+				"https://cdn.jsdelivr.net/npm/@inlang/plugin-m-function-matcher@2/dist/index.js",
+			];
+		});
+		expect(parseDirectProject(f.projectPath)).not.toBeNull();
+	});
+
 	it("tolerates lint-rule modules", () => {
 		const f = fixture();
 		patchSettings(f, (s) => {

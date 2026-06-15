@@ -8,6 +8,7 @@ Which project setups paraglide-messages-mcp works with, and what to expect.
 | --- | --- | --- |
 | Paraglide JS default (`messages/{locale}.json`, message format plugin) | ✅ | The target setup — direct file access, works offline. |
 | inlang message format with a custom `pathPattern` (single file per locale) | ✅ | Same path, any location, e.g. `./src/i18n/{locale}.json`. |
+| Message format plus `@inlang/plugin-m-function-matcher` | ✅ | Supported as a companion matcher; it does not change message file storage. |
 | inlang message format with multiple files per locale (`pathPattern` array) | ❌ | Requires the inlang SDK, which this server no longer ships. |
 | i18next / next-intl / ICU MessageFormat plugins | ❌ | Same — these go through the inlang SDK. |
 | gettext / `.po` files, XLIFF | ❌ | No inlang plugin exists for these formats either. |
@@ -20,8 +21,8 @@ directly. The project's `project.inlang/settings.json` must declare:
 - `baseLocale` (string) and `locales` (array of strings)
 - `plugin.inlang.messageFormat` with a **single string** `pathPattern`
   containing `{locale}` (e.g. `"./messages/{locale}.json"`)
-- no other import/export plugin module in `modules` (lint-rule modules are
-  fine)
+- no unsupported import/export plugin module in `modules`
+  (`@inlang/plugin-m-function-matcher` and lint-rule modules are fine)
 
 Any other configuration is rejected at the first tool call with a clear
 error. This is the standard Paraglide JS setup, so most projects qualify
