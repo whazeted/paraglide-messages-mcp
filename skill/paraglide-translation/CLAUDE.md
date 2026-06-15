@@ -1,1 +1,0 @@
-When mentioning constants in the SKILL.md make sure to refernece contstants.ts.
