@@ -1,6 +1,6 @@
 {
 	"name": "paraglide-messages-mcp",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "MCP server for translating Paraglide JS / inlang projects in validated per-locale batches — built for one agent per locale in parallel",
 	"license": "MIT",
 	"mcpName": "io.github.whazeted/paraglide-messages-mcp",
