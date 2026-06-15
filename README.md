@@ -93,12 +93,18 @@ without spending tool calls.
 workflow, plural-rule handling, and error recovery.
 
 ```sh
-# Claude Code (plugin bundles the MCP server + skill, no .mcp.json needed)
-/plugin marketplace add whazeted/paraglide-messages-mcp
-/plugin install paraglide-translation@paraglide-messages-mcp
+# Codex, via the skills CLI
+npx skills add whazeted/paraglide-messages-mcp --skill paraglide-translation -a codex
 
-# any other agent, via the skills CLI
-npx skills add whazeted/paraglide-messages-mcp
+# Or install from the skill folder URL directly
+npx skills add https://github.com/whazeted/paraglide-messages-mcp/tree/main/skill/paraglide-translation -a codex
+```
+
+For other skills-compatible agents, replace `codex` with that agent's
+`skills` CLI target name. You can list the skill before installing:
+
+```sh
+npx skills add whazeted/paraglide-messages-mcp --list
 ```
 
 ## Compatibility
