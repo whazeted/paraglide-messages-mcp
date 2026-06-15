@@ -88,9 +88,8 @@ without spending tool calls.
 
 ## Agent skill
 
-`skill/paraglide-translation/` is an installable skill in the open
-[Agent Skills](https://agentskills.io) format that teaches any agent the
-workflow, plural-rule handling, and error recovery.
+`skill/paraglide-translation/` is an optional installable skill in the open
+[Agent Skills](https://agentskills.io) format. The skill simply points the agent to the MCP server.
 
 ```sh
 # Codex, via the skills CLI
