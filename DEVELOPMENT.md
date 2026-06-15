@@ -120,7 +120,7 @@ validation and the unknown-key guard still apply.
 ## The translation loop
 
 ```
-project_info  +  style brief (tone, formality, glossary)
+project_info  +  startup/user style brief (tone, formality, glossary)
 └─ one (sub)agent per target locale, in parallel:
    ┌─> get_translation_batch { targetLocale: "de", batchSize: 50 }
    │   ... agent translates the items ...
@@ -132,7 +132,7 @@ Per-item validation is what makes large batches safe: a bad translation is
 rejected individually while the rest of the batch is saved, and the agent
 re-submits only the failures. Scope work to a catalog subsection with
 `prefix` (e.g. `"checkout_"`). The `translate_project` prompt encodes the
-full fan-out workflow including the style brief.
+full fan-out workflow including the startup/user-provided style brief.
 
 To *redo* existing translations (stale copy, changed terminology), the same
 loop runs on `get_retranslation_batch`, which also returns keys that already

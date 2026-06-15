@@ -56,6 +56,10 @@ export function registerTools(
 				locales: z.array(z.string()),
 				pluginKey: z.string(),
 				totalKeys: z.number().int(),
+				translationStyle: z
+					.string()
+					.optional()
+					.describe("linguistic style brief configured at server startup"),
 				translated: z
 					.record(z.string(), z.number().int())
 					.describe("per locale: keys with a non-empty message"),

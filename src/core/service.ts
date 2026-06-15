@@ -41,10 +41,20 @@ import type {
  * external edits are always picked up.
  */
 export class TranslationService {
-	constructor(public readonly projectPath: string) {}
+	public readonly translationStyle?: string;
+
+	constructor(
+		public readonly projectPath: string,
+		options: { translationStyle?: string } = {}
+	) {
+		this.translationStyle = options.translationStyle?.trim() || undefined;
+	}
 
 	projectInfo(): ProjectInfo {
-		return computeProjectInfo(this.projectPath, readSnapshot(this.projectPath));
+		return {
+			...computeProjectInfo(this.projectPath, readSnapshot(this.projectPath)),
+			...(this.translationStyle && { translationStyle: this.translationStyle }),
+		};
 	}
 
 	listKeys(args: {

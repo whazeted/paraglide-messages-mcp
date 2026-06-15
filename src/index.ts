@@ -1,4 +1,4 @@
-export { createServer, SERVER_VERSION } from "./server.js";
+export { createServer, SERVER_VERSION, type ServerOptions } from "./server.js";
 export { TranslationService } from "./core/service.js";
 export { discoverProjectPath } from "./core/project.js";
 export {

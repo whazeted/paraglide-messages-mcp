@@ -13,9 +13,11 @@ rejected on its own instead of sinking the call.
 ## Workflow (single locale)
 
 1. **`project_info`** — learn the base locale, target locales, and how many
-   messages are missing per locale. Confirm with the user which locale(s) and
-   (optionally) which key prefix to work on if not already specified, along
-   with any style preferences (tone, formality, terminology).
+   messages are missing per locale. If `translationStyle` is present, use it
+   as the linguistic brief. If it is absent, ask the user for tone, formality,
+   and terminology before translating. Do not derive style from existing
+   translations. Confirm with the user which locale(s) and (optionally) which
+   key prefix to work on if not already specified.
 2. Loop until `done` is true:
    a. **`get_translation_batch`** with `targetLocale` (and `prefix` if
       scoping). Omit `batchSize` to use the default (defined in
@@ -37,15 +39,15 @@ Each locale lives in its own message file, and `get_translation_batch` /
 per-locale agents cannot interfere with each other. When more than one locale
 needs translation, fan out instead of going locale after locale:
 
-1. **Settle the style brief first** (main agent, before delegating). Sample
-   representative messages with `get_messages`, then write a short brief:
-   tone and voice; formality/address per target language where the language
-   forces a choice (German *Sie*/*du*, Dutch *u*/*je*, formal vs. plain
-   Japanese, …); a glossary of recurring product terms (and which stay
-   untranslated, e.g. brand names); and the non-negotiables (preserve
+1. **Settle the style brief first** (main agent, before delegating). Use
+   `project_info.translationStyle` when present. If it is absent, ask the user
+   for a short brief: tone and voice; formality/address per target language
+   where the language forces a choice (German *Sie*/*du*, Dutch *u*/*je*,
+   formal vs. plain Japanese, …); a glossary of recurring product terms (and
+   which stay untranslated, e.g. brand names). Do not infer linguistic style
+   from existing translations. Include the non-negotiables (preserve
    `{placeholder}` names and markup exactly, adapt plural match cases per
-   language). Ask the user when unclear, otherwise decide and state the brief
-   in your summary.
+   language) in what you hand to subagents.
 2. **Spawn one subagent per target locale, in parallel.** Each subagent gets
    the style brief verbatim, its single locale, and the single-locale
    workflow above. A subagent translates only its own locale — never others.
@@ -69,7 +71,7 @@ Two things differ from the normal loop:
   copy changed); an unscoped retranslate redoes the entire project. Default
   to **all target locales** — retranslating only one locale leaves the
   others stale, which defeats the point. Fan out one subagent per locale
-  exactly as above, sharing one style brief.
+  exactly as above, sharing the startup/user-provided style brief.
 - **Loop by cursor, not by `done`.** Saving doesn't shrink the scope (a
   retranslated key stays in it), so page instead: call
   `get_retranslation_batch`, translate, save, then call again with
@@ -118,9 +120,10 @@ context or when you only need to inspect state, not change it.
   fixing such a message, consolidate it: merge every element's `match`
   entries (and `declarations`/`selectors`) into one single-element array.
   The server rejects multi-element saves with a hint saying exactly this.
-- Settle on a style before translating — tone, formality level (e.g. formal
-  vs. informal address), and key terminology. Ask the user for preferences
-  when unclear, otherwise define one yourself and state it in your summary.
+- Use the configured style brief before translating — tone, formality level
+  (e.g. formal vs. informal address), and key terminology. If no startup
+  brief is configured, ask the user. Do not infer linguistic style from
+  existing translations.
 - For UI strings, prefer the conventional terms of the platform/language
   over literal translations, and keep them roughly as short as the source.
 - When a source string is ambiguous (e.g. "Open" — verb or adjective?), use

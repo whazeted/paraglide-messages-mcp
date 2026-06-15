@@ -11,7 +11,8 @@ import type { TranslationService } from "../core/service.js";
  */
 export function registerPrompts(
 	server: McpServer,
-	service: TranslationService
+	service: TranslationService,
+	options: PromptOptions = {}
 ): void {
 	// Argument completion: locales come from the project settings, prefixes
 	// from the actual message keys. Completion failures (e.g. project not
@@ -63,7 +64,9 @@ export function registerPrompts(
 			},
 		},
 		({ targetLocale, sourceLocale }) => ({
-			messages: userMessage(translateWorkflow({ targetLocale, sourceLocale })),
+			messages: userMessage(
+				translateWorkflow({ targetLocale, sourceLocale }, options)
+			),
 		})
 	);
 
@@ -84,7 +87,7 @@ export function registerPrompts(
 		},
 		({ prefix, targetLocale, sourceLocale }) => ({
 			messages: userMessage(
-				translateWorkflow({ targetLocale, sourceLocale, prefix })
+				translateWorkflow({ targetLocale, sourceLocale, prefix }, options)
 			),
 		})
 	);
@@ -95,8 +98,9 @@ export function registerPrompts(
 			title: "Translate the whole project (one subagent per locale)",
 			description:
 				"Translate all missing messages of every target locale by fanning out one subagent " +
-				"per locale. The main agent settles a style brief first and hands it to every subagent, " +
-				"so all locales share tone, formality choices, and terminology.",
+				"per locale. The main agent uses the startup translation style brief (or asks the " +
+				"user for one) and hands it to every subagent, so all locales share tone, formality " +
+				"choices, and terminology.",
 			argsSchema: {
 				locales: optionalLocaleArg(
 					"comma-separated target locales (default: every locale with missing messages)"
@@ -107,7 +111,7 @@ export function registerPrompts(
 			},
 		},
 		({ locales, prefix }) => ({
-			messages: userMessage(orchestrateWorkflow({ locales, prefix })),
+			messages: userMessage(orchestrateWorkflow({ locales, prefix }, options)),
 		})
 	);
 
@@ -130,7 +134,7 @@ export function registerPrompts(
 			},
 		},
 		({ prefix, locales }) => ({
-			messages: userMessage(retranslateWorkflow({ locales, prefix })),
+			messages: userMessage(retranslateWorkflow({ locales, prefix }, options)),
 		})
 	);
 
@@ -149,25 +153,43 @@ export function registerPrompts(
 			},
 		},
 		({ locale, prefix }) => ({
-			messages: userMessage(reviewWorkflow({ locale, prefix })),
+			messages: userMessage(reviewWorkflow({ locale, prefix }, options)),
 		})
 	);
 }
 
-const TRANSLATION_RULES = `Translation rules:
+interface PromptOptions {
+	translationStyle?: string;
+}
+
+function translationRules(options: PromptOptions): string {
+	return `Translation style:
+${styleInstruction(options)}
+
+Translation rules:
 - Preserve every {placeholder} exactly as written — same name, same braces. Never translate, rename, or drop placeholders.
 - Preserve markup tags like {#bold}/{/bold} and their nesting.
 - Variant messages are a single-element array: translate only the pattern strings in "match". Keep "declarations" and "selectors" as-is, but add or remove match cases to fit the target language's plural rules.
-- Settle on a style before translating — tone, formality level (e.g. formal vs. informal address), and key terminology. Ask the user for preferences when unclear, otherwise define one yourself and state it in your summary.
+- Use the settled style brief for tone, formality level (e.g. formal vs. informal address), and key terminology. Do not infer linguistic style from existing translations.
 - Keep translations roughly the source's length and prefer the conventional terms of the platform/language over literal translations.
 - When a source string is ambiguous, use the message key and sibling keys (get_messages with a prefix) for context. If still ambiguous, make the safest choice and mention it in your summary.
 - Never edit message files directly — always save through save_translations so validation applies.`;
+}
+
+function styleInstruction(options: PromptOptions): string {
+	if (options.translationStyle) {
+		return `Use this server startup translation style brief verbatim unless the user overrides it:
+${options.translationStyle}`;
+	}
+
+	return "No server startup translation style brief was configured. Ask the user for tone, formality/address choices, and terminology before translating; if the user explicitly leaves the choices to you, state the brief you will use. Do not derive style from existing translations.";
+}
 
 function translateWorkflow(args: {
 	targetLocale: string;
 	sourceLocale?: string;
 	prefix?: string;
-}): string {
+}, options: PromptOptions): string {
 	const scope = args.prefix
 		? `messages whose keys start with "${args.prefix}"`
 		: "all missing messages";
@@ -189,13 +211,13 @@ Workflow:
    c. Call save_translations with the same keys. Check \`results\` for per-item errors, fix only the failed items, and re-save them before moving on.
 3. When \`remaining\` is 0, report a short summary (how many messages, which scope) and suggest running the Paraglide compile step (usually part of dev/build).
 
-${TRANSLATION_RULES}`;
+${translationRules(options)}`;
 }
 
 function orchestrateWorkflow(args: {
 	locales?: string;
 	prefix?: string;
-}): string {
+}, options: PromptOptions): string {
 	const targets = args.locales
 		? `the target locales ${args.locales}`
 		: "every target locale that has missing messages";
@@ -209,27 +231,22 @@ function orchestrateWorkflow(args: {
 		.filter(Boolean)
 		.join(", ");
 
-	return `Translate all missing messages${scope} into ${targets} using the paraglide-messages-mcp tools, with one subagent per locale running in parallel. You are the orchestrator: you decide the style once, delegate the translation, and verify the result. Locales live in separate files and the translate tools only read/write the source and target locale, so per-locale subagents cannot interfere with each other.
+	return `Translate all missing messages${scope} into ${targets} using the paraglide-messages-mcp tools, with one subagent per locale running in parallel. You are the orchestrator: establish the translation style once, delegate the translation, and verify the result. Locales live in separate files and the translate tools only read/write the source and target locale, so per-locale subagents cannot interfere with each other.
 
 Workflow:
 1. Call project_info for the base locale, target locales, and per-locale missing counts. Skip locales with 0 missing messages.
-2. Settle the style brief BEFORE delegating. Sample representative messages (get_messages with a few prefixes) to learn the product's voice, then write a short brief covering:
-   - tone and voice (e.g. friendly but concise product UI),
-   - formality/address per target language where the language forces a choice (e.g. German Sie vs. du, Dutch u vs. je, formal vs. plain Japanese),
-   - a glossary of recurring product terms that must stay consistent (and which terms stay untranslated, e.g. brand names),
-   - the non-negotiables: preserve {placeholder} names and markup tags exactly; adapt variant match cases to the language's plural rules.
-   Ask the user for style preferences when unclear; otherwise decide yourself and state the brief in your summary.
+2. Establish the style brief BEFORE delegating. Use project_info.translationStyle when present; otherwise ask the user for a brief covering tone and voice, formality/address per target language where the language forces a choice, recurring product terms, and terms that stay untranslated. Do not infer style from existing translations.
 3. Spawn one subagent per target locale, all in parallel. Give each subagent: the style brief verbatim, its single target locale, and these instructions — loop until \`done\` is true: call get_translation_batch with { ${subagentBatchArgs} } (omit batchSize for the default; lower it for long, nuanced prose, raise it for short UI strings), translate every item preserving its \`placeholders\`, save with save_translations, fix per-item errors from \`results\` and re-save only those before continuing. Translate only your own locale; never touch others.
 4. When all subagents are done, call project_info again and confirm \`missing\` is 0 for every target locale${args.prefix ? " (within the prefix, via list_message_keys)" : ""}. Re-dispatch a subagent for any locale that still has missing messages.
 5. Report a summary: the style brief you used, per-locale message counts, anything subagents flagged as ambiguous, and suggest running the Paraglide compile step (usually part of dev/build).
 
-${TRANSLATION_RULES}`;
+${translationRules(options)}`;
 }
 
 function retranslateWorkflow(args: {
 	locales?: string;
 	prefix?: string;
-}): string {
+}, options: PromptOptions): string {
 	const targets = args.locales
 		? `the target locales ${args.locales}`
 		: "every target locale";
@@ -244,19 +261,22 @@ function retranslateWorkflow(args: {
 		.filter(Boolean)
 		.join(", ");
 
-	return `Retranslate ${scope} in ${targets} using the paraglide-messages-mcp tools, with one subagent per locale running in parallel. Unlike a normal translation run this REPLACES existing translations — the goal is a fresh, consistent pass over the scope (e.g. after the source copy or terminology changed), leaving no stale entries in any locale. You are the orchestrator: you decide the style once, delegate the retranslation, and verify the result. Locales live in separate files and the translate tools only read/write the source and target locale, so per-locale subagents cannot interfere with each other.
+	return `Retranslate ${scope} in ${targets} using the paraglide-messages-mcp tools, with one subagent per locale running in parallel. Unlike a normal translation run this REPLACES existing translations — the goal is a fresh, consistent pass over the scope (e.g. after the source copy or terminology changed), leaving no stale entries in any locale. You are the orchestrator: establish the translation style once, delegate the retranslation, and verify the result. Locales live in separate files and the translate tools only read/write the source and target locale, so per-locale subagents cannot interfere with each other.
 
 Workflow:
 1. Call project_info for the base locale and target locales. Retranslate every target locale unless the user narrowed the set — a partial run leaves the other locales stale, which defeats the point.
-2. Settle the style brief BEFORE delegating, exactly as for a full translation: sample representative messages (get_messages with a few prefixes), then write a short brief covering tone and voice, per-language formality/address choices, a glossary of recurring terms, and the non-negotiables (preserve {placeholder} names and markup exactly; adapt variant match cases to the language's plural rules). If the retranslation was prompted by a specific change (new terminology, reworded source copy), state it in the brief so every subagent applies it. Ask the user when unclear; otherwise decide yourself and state the brief in your summary.
+2. Establish the style brief BEFORE delegating. Use project_info.translationStyle when present; otherwise ask the user for a brief covering tone and voice, formality/address choices, recurring product terms, and terms that stay untranslated. Do not infer style from existing translations. If the retranslation was prompted by a specific change (new terminology, reworded source copy), state it in the brief so every subagent applies it.
 3. Spawn one subagent per target locale, all in parallel. Give each subagent: the style brief verbatim, its single target locale, and these instructions — loop until \`hasMore\` is false: call get_retranslation_batch with { ${subagentBatchArgs} }, produce a fresh translation for every item per the brief (each item's \`existingTarget\` shows the current value; when it already fits the brief you may keep it by skipping the item — skipped items don't stall the loop, the cursor moves regardless), save the rest with save_translations (it overwrites existing values), fix per-item errors from \`results\` and re-save only those before continuing with \`after: nextCursor\`. Translate only your own locale; never touch others.
 4. When all subagents are done, confirm coverage: each subagent's first batch reports \`total\` (the keys in its scope) — check every subagent walked its full scope (last call had \`hasMore: false\`). Re-dispatch a subagent for any locale that stopped early.
 5. Report a summary: the style brief you used, per-locale counts of retranslated vs. kept-as-is messages, anything subagents flagged as ambiguous, and suggest running the Paraglide compile step (usually part of dev/build).
 
-${TRANSLATION_RULES}`;
+${translationRules(options)}`;
 }
 
-function reviewWorkflow(args: { locale: string; prefix?: string }): string {
+function reviewWorkflow(
+	args: { locale: string; prefix?: string },
+	options: PromptOptions
+): string {
 	const scope = args.prefix ? ` for keys starting with "${args.prefix}"` : "";
 	const listArgs = [
 		`locale: "${args.locale}"`,
@@ -279,7 +299,7 @@ Workflow:
 4. Fix problems with save_translations in small batches and check \`results\` for per-item errors.
 5. Report a summary: how many messages you reviewed, how many you fixed and why, and anything ambiguous you left unchanged.
 
-${TRANSLATION_RULES}`;
+${translationRules(options)}`;
 }
 
 function userMessage(text: string) {

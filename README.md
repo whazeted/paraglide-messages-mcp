@@ -34,7 +34,14 @@ No installation — add this to your `.mcp.json` (Claude Code) or
   "mcpServers": {
     "paraglide": {
       "command": "npx",
-      "args": ["-y", "paraglide-messages-mcp", "--project", "./project.inlang"]
+      "args": [
+        "-y",
+        "paraglide-messages-mcp",
+        "--project",
+        "./project.inlang",
+        "--translation-style",
+        "Concise product UI; informal address; keep brand terms untranslated."
+      ]
     }
   }
 }
@@ -42,6 +49,9 @@ No installation — add this to your `.mcp.json` (Claude Code) or
 
 `--project` is optional: the server finds `project.inlang` in the working
 directory (or a single `*.inlang` directory up to one level deep) by itself.
+`--translation-style` is optional but recommended: it gives agents the
+linguistic brief to use for tone, formality, and terminology instead of
+deriving style from existing translations.
 
 Then ask your agent to translate — or use the `translate_project` prompt to
 translate every locale at once with one subagent per locale.
@@ -50,7 +60,7 @@ translate every locale at once with one subagent per locale.
 
 | Tool | Purpose |
 | --- | --- |
-| `project_info` | Locales, base locale, per-locale translated/missing counts. |
+| `project_info` | Locales, base locale, per-locale translated/missing counts, and the startup translation style brief when configured. |
 | `get_translation_batch` | Next batch of untranslated messages for a locale (default 50), with source text and required placeholders. |
 | `get_retranslation_batch` | Cursor-paged batch over *already-translated* messages too — refresh stale entries after source/terminology changes. |
 | `save_translations` | Validate and persist translations for one locale; per-item results — overwrites existing values. |
@@ -64,7 +74,7 @@ translate every locale at once with one subagent per locale.
 
 | Prompt | Purpose |
 | --- | --- |
-| `translate_project` | Translate every locale: the main agent settles a style brief (tone, formality, glossary), then fans out one subagent per locale in parallel. |
+| `translate_project` | Translate every locale: the main agent uses the startup translation style brief (or asks the user for one), then fans out one subagent per locale in parallel. |
 | `translate_locale` | Translate one locale via the batch loop. |
 | `translate_prefix` | Same, scoped to keys starting with a prefix. |
 | `retranslate` | Redo existing translations (stale copy, changed terminology) — by key prefix, every target locale by default, one subagent per locale. |
@@ -101,16 +111,13 @@ the exact criteria and reasoning.
 ## Performance
 
 A full 10-locale translation run over a 5,000-message project costs ~3 s of
-server time — the pipeline is bounded by the agent's translation speed, not
-the server. Measurements and history in [PERFORMANCE.md](PERFORMANCE.md).
+server time (M1 Max Mac Studio)— the pipeline is bounded by the agent's translation speed, not
+the server.
 
 ## Documentation
-
 - [DEVELOPMENT.md](DEVELOPMENT.md) — architecture, message format details,
   validation rules, building, testing, benchmarking, releasing
-- [DECISIONS.md](DECISIONS.md) — decision log: what was chosen and why
 - [COMPATIBILITY.md](COMPATIBILITY.md) — supported project setups
-- [PERFORMANCE.md](PERFORMANCE.md) — benchmarks and optimization history
 
 ## License
 

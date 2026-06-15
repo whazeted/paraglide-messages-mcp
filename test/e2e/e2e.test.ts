@@ -260,6 +260,49 @@ describe("paraglide-messages-mcp end to end", () => {
 		expect(text).toContain("save_translations");
 	});
 
+	it("surfaces the startup translation style in project_info and prompts", async () => {
+		const translationStyle =
+			"Concise product UI; informal address; keep brand terms untranslated.";
+		const styledClient = new Client({ name: "styled-e2e-test", version: "0.0.0" });
+		await styledClient.connect(
+			new StdioClientTransport({
+				command: process.execPath,
+				args: [
+					cliPath,
+					"--project",
+					fixture.projectPath,
+					"--translation-style",
+					translationStyle,
+				],
+				stderr: "pipe",
+			})
+		);
+
+		try {
+			const infoResult = await styledClient.callTool({
+				name: "project_info",
+				arguments: {},
+			});
+			expect(infoResult.structuredContent).toMatchObject({
+				translationStyle,
+			});
+
+			const prompt = await styledClient.getPrompt({
+				name: "translate_project",
+				arguments: { locales: "fr" },
+			});
+			const text =
+				prompt.messages[0]?.content.type === "text"
+					? prompt.messages[0].content.text
+					: "";
+			expect(text).toContain("server startup translation style brief");
+			expect(text).toContain(translationStyle);
+			expect(text).not.toContain("Sample representative messages");
+		} finally {
+			await styledClient.close();
+		}
+	});
+
 	it("lists the static and per-locale resources", async () => {
 		const { resources } = await client.listResources();
 		const uris = resources.map((r) => r.uri);

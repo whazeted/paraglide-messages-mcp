@@ -48,6 +48,8 @@ export type ProjectInfo = {
 	locales: string[];
 	pluginKey: string;
 	totalKeys: number;
+	/** Linguistic style brief configured at server startup, if any. */
+	translationStyle?: string;
 	/** per locale: number of keys that have a non-empty message */
 	translated: Record<string, number>;
 	/** per locale: number of keys missing or empty */
