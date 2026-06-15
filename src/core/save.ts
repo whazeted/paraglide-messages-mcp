@@ -20,6 +20,68 @@ export type SaveSummary = {
 };
 
 /**
+ * The save-result fields a batch tool reports when translations were submitted
+ * for autosaving alongside the fetch. `allSaved` is the single signal an agent
+ * checks to know its submitted work landed: true iff nothing was rejected.
+ */
+export type SaveFields = {
+	saved: number;
+	failed: number;
+	saveResults: SaveResultItem[];
+	allSaved: boolean;
+};
+
+export type SaveArgs = {
+	targetLocale: string;
+	sourceLocale?: string;
+	translations: TranslationInput[];
+	allowNewKeys?: boolean;
+	skipValidation?: boolean;
+};
+
+/**
+ * The shared save core behind both save_translations and the batch tools'
+ * autosave: validates the batch against the snapshot and returns the per-item
+ * results, the accepted `key -> value` map to persist, and the summary. The
+ * caller is responsible for actually writing `accepted` (via mutateKeys).
+ */
+export function runSave(
+	context: ProjectSnapshot,
+	args: SaveArgs
+): { results: SaveResultItem[]; accepted: Record<string, MessageValue>; summary: SaveSummary } {
+	const { results, accepted } = validateBatch(context, args);
+	const summary = summarizeSave(
+		context,
+		args.targetLocale,
+		args.sourceLocale,
+		results,
+		accepted
+	);
+	return { results, accepted, summary };
+}
+
+/**
+ * Returns a snapshot with `accepted` merged into the target locale, i.e. the
+ * project state as it will be once the save is written. The batch tools page
+ * the *next* batch against this so a just-saved key is no longer reported as
+ * untranslated (translate loop) or carries its fresh value as `existingTarget`
+ * (retranslate loop).
+ */
+export function withAccepted(
+	context: ProjectSnapshot,
+	targetLocale: string,
+	accepted: Record<string, MessageValue>
+): ProjectSnapshot {
+	return {
+		...context,
+		snapshot: {
+			...context.snapshot,
+			[targetLocale]: { ...(context.snapshot[targetLocale] ?? {}), ...accepted },
+		},
+	};
+}
+
+/**
  * Validates a save batch against the current snapshot. Pure: returns the
  * per-item results plus the accepted `key -> value` map to persist.
  *

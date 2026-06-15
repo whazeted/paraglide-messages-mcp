@@ -30,6 +30,73 @@ const localesAfterChangeSchema = z
 	.array(z.string())
 	.describe("the project's locales after the change");
 
+// One translation to save. Shared by save_translations and the batch tools'
+// optional autosave input.
+const translationItemSchema = z.object({
+	key: z.string().describe("message key"),
+	value: messageValueSchema.describe(
+		"translated value: string like 'Hallo {name}' or " +
+			'[{"declarations": [...], "selectors": [...], "match": {"count=one": "...", "count=other": "..."}}]'
+	),
+});
+
+// One per-item save outcome. Shared by save_translations.results and the
+// batch tools' saveResults.
+const saveResultItemSchema = z.object({
+	key: z.string(),
+	status: z.enum(["saved", "error"]),
+	error: z.string().optional(),
+	warnings: z.array(z.string()).optional(),
+});
+
+// Optional save inputs the batch tools accept to autosave the previous batch
+// before paging the next one (same semantics as save_translations).
+const autosaveInputSchema = {
+	translations: z
+		.array(translationItemSchema)
+		.optional()
+		.describe(
+			"the PREVIOUS batch's translations to save before returning the next batch — " +
+				"validated and persisted exactly like save_translations. Omit on the first (priming) call."
+		),
+	allowNewKeys: z
+		.boolean()
+		.optional()
+		.describe("for the autosave: allow creating keys that don't exist yet (default false)"),
+	skipValidation: z
+		.boolean()
+		.optional()
+		.describe(
+			"for the autosave: skip placeholder/markup/variant validation against the source (default false)"
+		),
+};
+
+// Save-outcome fields the batch tools report when translations were submitted
+// for autosaving. All optional: absent on a priming call with no translations.
+const autosaveOutputSchema = {
+	saved: z
+		.number()
+		.int()
+		.optional()
+		.describe("autosaved translations (present only when translations were submitted)"),
+	failed: z
+		.number()
+		.int()
+		.optional()
+		.describe("submitted translations rejected (present only when translations were submitted)"),
+	saveResults: z
+		.array(saveResultItemSchema)
+		.optional()
+		.describe("per-item outcome of the autosave; fix and re-save any with status 'error'"),
+	allSaved: z
+		.boolean()
+		.optional()
+		.describe(
+			"true when every submitted translation was saved (failed === 0); absent when no " +
+				"translations were submitted. Combine with `done`/`hasMore` to confirm the run is complete and persisted."
+		),
+};
+
 const readOnlyAnnotations = {
 	readOnlyHint: true,
 	destructiveHint: false,
@@ -278,8 +345,14 @@ export function registerTools(
 			description:
 				"Get the next batch of untranslated messages for a target locale (optionally " +
 				"limited to a key prefix). Returns the source text, required placeholders, and the " +
-				"number of remaining untranslated messages. Workflow: call this, translate the items, " +
-				"save them with save_translations, then call this again until `done` is true. " +
+				"number of remaining untranslated messages. " +
+				"Fused loop (fewer round-trips): pass the PREVIOUS batch's `translations` to this " +
+				"call — they are saved first (same validation as save_translations), then the next " +
+				"batch is computed from the post-save state. So the loop is: call once to prime, then " +
+				"repeatedly translate + call again with `translations` set, until `done` is true — the " +
+				"final batch is autosaved by the same call that reports done, with no trailing save. " +
+				"Check `allSaved`/`saveResults`: a failed item is not saved (it reappears in a later " +
+				"batch), so fix it and re-save (here or via save_translations). " +
 				"Raise batchSize for short UI strings (fewer round-trips); lower it for long, " +
 				"nuanced prose so each item gets full attention. Reads only the source and target locale " +
 				"files, so per-locale agents can run in parallel without touching each other's locales.",
@@ -288,7 +361,10 @@ export function registerTools(
 				sourceLocale: z
 					.string()
 					.optional()
-					.describe("locale to translate from (default: project base locale)"),
+					.describe(
+						"locale to translate from (default: project base locale). When autosaving, " +
+							"the same sourceLocale is used to validate the submitted translations."
+					),
 				prefix: z
 					.string()
 					.optional()
@@ -302,6 +378,7 @@ export function registerTools(
 						"messages per batch; omit for a sensible default — raise for " +
 							"short strings, lower for long, nuanced prose"
 					),
+				...autosaveInputSchema,
 			},
 			outputSchema: {
 				targetLocale: z.string(),
@@ -323,12 +400,28 @@ export function registerTools(
 				remaining: z
 					.number()
 					.int()
-					.describe("untranslated messages left for this locale/prefix"),
+					.describe("untranslated messages left for this locale/prefix (after the autosave, if any)"),
 				done: z.boolean().describe("true when nothing is left to translate"),
+				nextStep: z
+					.string()
+					.optional()
+					.describe(
+						"present only while messages remain: a reminder to call get_translation_batch " +
+							"again to continue the loop. Absent when `done` is true."
+					),
+				...autosaveOutputSchema,
 			},
-			annotations: readOnlyAnnotations,
+			// not readOnly: when `translations` is supplied the call autosaves.
+			annotations: saveAnnotations,
 		},
-		async (args) => jsonResult(await service.getTranslationBatch(args))
+		async (args) =>
+			jsonResult(
+				await service.getTranslationBatch({
+					...args,
+					// zod validates the single-element variant array shape at runtime
+					translations: args.translations as TranslationInput[] | undefined,
+				})
+			)
 	);
 
 	server.registerTool(
@@ -340,18 +433,26 @@ export function registerTools(
 				"get_translation_batch this includes keys that already have a translation, so a " +
 				"full pass refreshes stale entries (and fills gaps) for everything in scope, " +
 				"optionally limited to a key prefix. Saving does not shrink the scope, so the " +
-				"loop pages by cursor instead of remaining/done. Workflow: call this, translate " +
-				"the items (each shows its current value as `existingTarget`; items that are " +
-				"already correct may be skipped), save with save_translations (which overwrites " +
-				"existing values), then call again with `after` set to the previous `nextCursor` " +
-				"until `hasMore` is false. Reads only the source and target locale files, so " +
-				"per-locale agents can run in parallel without touching each other's locales.",
+				"loop pages by cursor instead of remaining/done. " +
+				"Fused loop (fewer round-trips): pass the PREVIOUS batch's `translations` to this " +
+				"call (it overwrites existing values), then page on with `after` set to the previous " +
+				"`nextCursor`. So the loop is: call once to prime, then repeatedly translate + call " +
+				"again with `translations` set and `after: nextCursor`, until `hasMore` is false — the " +
+				"last batch is autosaved by the same call. Each item shows its current value as " +
+				"`existingTarget`; an item already correct may be skipped (omit it from `translations`) " +
+				"without stalling the loop, since the cursor moves regardless. " +
+				"Check `allSaved`/`saveResults` and re-save any failed item (it is past the cursor, so " +
+				"re-save it here or via save_translations). Reads only the source and target locale " +
+				"files, so per-locale agents can run in parallel without touching each other's locales.",
 			inputSchema: {
 				targetLocale: z.string().describe("locale to retranslate"),
 				sourceLocale: z
 					.string()
 					.optional()
-					.describe("locale to translate from (default: project base locale)"),
+					.describe(
+						"locale to translate from (default: project base locale). When autosaving, " +
+							"the same sourceLocale is used to validate the submitted translations."
+					),
 				prefix: z
 					.string()
 					.optional()
@@ -371,6 +472,7 @@ export function registerTools(
 					.describe(
 						"pagination cursor: return keys after this key (use the previous call's `nextCursor`)"
 					),
+				...autosaveInputSchema,
 			},
 			outputSchema: {
 				targetLocale: z.string(),
@@ -404,10 +506,26 @@ export function registerTools(
 					.string()
 					.optional()
 					.describe("pass as `after` in the next call; absent on the last page"),
+				nextStep: z
+					.string()
+					.optional()
+					.describe(
+						"present only while more pages remain: a reminder to call get_retranslation_batch " +
+							"again with `after: nextCursor` to continue the loop. Absent on the last page."
+					),
+				...autosaveOutputSchema,
 			},
-			annotations: readOnlyAnnotations,
+			// not readOnly: when `translations` is supplied the call autosaves.
+			annotations: saveAnnotations,
 		},
-		async (args) => jsonResult(await service.getRetranslationBatch(args))
+		async (args) =>
+			jsonResult(
+				await service.getRetranslationBatch({
+					...args,
+					// zod validates the single-element variant array shape at runtime
+					translations: args.translations as TranslationInput[] | undefined,
+				})
+			)
 	);
 
 	server.registerTool(
@@ -432,15 +550,7 @@ export function registerTools(
 							"When saving a batch fetched with sourceLocale, pass the same sourceLocale here."
 					),
 				translations: z
-					.array(
-						z.object({
-							key: z.string().describe("message key"),
-							value: messageValueSchema.describe(
-								"translated value: string like 'Hallo {name}' or " +
-									'[{"declarations": [...], "selectors": [...], "match": {"count=one": "...", "count=other": "..."}}]'
-							),
-						})
-					)
+					.array(translationItemSchema)
 					.min(1)
 					.describe("translations to save"),
 				allowNewKeys: z
@@ -459,14 +569,7 @@ export function registerTools(
 					),
 			},
 			outputSchema: {
-				results: z.array(
-					z.object({
-						key: z.string(),
-						status: z.enum(["saved", "error"]),
-						error: z.string().optional(),
-						warnings: z.array(z.string()).optional(),
-					})
-				),
+				results: z.array(saveResultItemSchema),
 				saved: z.number().int(),
 				failed: z.number().int(),
 				remainingForLocale: z

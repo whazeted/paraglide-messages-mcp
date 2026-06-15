@@ -61,9 +61,9 @@ translate every locale at once with one subagent per locale.
 | Tool | Purpose |
 | --- | --- |
 | `project_info` | Locales, base locale, `totalKeys` across all locales, `translatableKeys` from non-empty base messages, per-locale translated/missing counts, extra non-source keys, and the startup translation style brief when configured. |
-| `get_translation_batch` | Next batch of untranslated messages for a locale (default 50), with source text and required placeholders. |
-| `get_retranslation_batch` | Cursor-paged batch over *already-translated* messages too — refresh stale entries after source/terminology changes. |
-| `save_translations` | Validate and persist translations for one locale; per-item results — overwrites existing values. |
+| `get_translation_batch` | Next batch of untranslated messages for a locale (default 50), with source text and required placeholders. Optionally autosaves the previous batch in the same call (pass `translations`), so the loop is one round-trip per batch and the final batch is saved by the call that reports `done`. |
+| `get_retranslation_batch` | Cursor-paged batch over *already-translated* messages too — refresh stale entries after source/terminology changes. Same optional autosave as `get_translation_batch`. |
+| `save_translations` | Validate and persist translations for one locale; per-item results — overwrites existing values. (The batch tools share this save core for their autosave.) |
 | `list_message_keys` | Keys only, filterable by prefix and status, paginated. |
 | `get_messages` | Full message content by keys or prefix. |
 | `search_messages` | Find messages by text or key substring. |

@@ -174,6 +174,74 @@ describe("paraglide-messages-mcp end to end", () => {
 		expect(info.missing.de).toBe(0);
 	});
 
+	it("fused loop: autosaves the previous batch and reports allSaved over the wire", async () => {
+		// own fixture/client so the shared sequential state above is untouched
+		const local = createFixtureProject();
+		const localClient = new Client({ name: "fused-e2e-test", version: "0.0.0" });
+		await localClient.connect(
+			new StdioClientTransport({
+				command: process.execPath,
+				args: [cliPath, "--project", local.projectPath],
+				stderr: "pipe",
+			})
+		);
+		try {
+			const call = async <T>(
+				name: string,
+				args: Record<string, unknown>
+			): Promise<T> => {
+				// the SDK validates structuredContent against the tool's
+				// outputSchema, so a populated autosave response is checked here
+				const r = await localClient.callTool({ name, arguments: args });
+				expect(r.isError ?? false).toBe(false);
+				return r.structuredContent as T;
+			};
+
+			type Batch = {
+				done: boolean;
+				items: Array<{ key: string; source: unknown }>;
+				saved?: number;
+				allSaved?: boolean;
+			};
+
+			let batch = await call<Batch>("get_translation_batch", {
+				targetLocale: "de",
+				batchSize: 2,
+			});
+			// priming call performed no save
+			expect(batch.saved).toBeUndefined();
+			expect(batch.allSaved).toBeUndefined();
+
+			let guard = 0;
+			while (!batch.done) {
+				if (++guard > 10) throw new Error("loop did not converge");
+				batch = await call<Batch>("get_translation_batch", {
+					targetLocale: "de",
+					batchSize: 2,
+					translations: batch.items.map((item) => ({
+						key: item.key,
+						value:
+							typeof item.source === "string"
+								? `DE:${item.source}`
+								: item.source,
+					})),
+				});
+				expect(batch.allSaved).toBe(true);
+			}
+
+			const deFile = local.readMessages("de") as Record<string, unknown>;
+			expect(deFile.checkout_title).toBe("DE:Checkout");
+			const info = await call<{ missing: Record<string, number> }>(
+				"project_info",
+				{}
+			);
+			expect(info.missing.de).toBe(0);
+		} finally {
+			await localClient.close();
+			removeFixture(local.rootDir);
+		}
+	});
+
 	it("retranslates an already-translated prefix via cursor pages", async () => {
 		// the previous test filled "de" completely; redo the checkout_ keys
 		let after: string | undefined;

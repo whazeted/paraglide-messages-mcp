@@ -200,9 +200,10 @@ function translateWorkflow(args: {
 	]
 		.filter(Boolean)
 		.join(", ");
-	const saveArgs = [
+	const fusedArgs = [
 		`targetLocale: "${args.targetLocale}"`,
 		args.sourceLocale ? `sourceLocale: "${args.sourceLocale}"` : null,
+		args.prefix ? `prefix: "${args.prefix}"` : null,
 		"translations: [...]",
 	]
 		.filter(Boolean)
@@ -210,13 +211,14 @@ function translateWorkflow(args: {
 
 	return `Translate ${scope} into "${args.targetLocale}" using the paraglide-messages-mcp tools. You are the translator; the server provides the messages and validates + writes your translations.
 
-Workflow:
+Workflow (one fused call per round saves the previous batch and fetches the next):
 1. Call project_info to confirm the locale and see how many messages are missing.
-2. Loop until \`done\` is true:
-   a. Call get_translation_batch with { ${batchArgs} }. Omit batchSize to use the default; raise it for short UI strings (fewer round-trips), or lower it for long, nuanced prose so each item gets full attention.
-   b. Translate each item's \`source\` into the target locale, preserving every placeholder listed in \`placeholders\`.
-   c. Call save_translations with { ${saveArgs} }. Use the same sourceLocale you passed to get_translation_batch. Check \`results\` for per-item errors, fix only the failed items, and re-save them before moving on.
-3. When \`remaining\` is 0, report a short summary (how many messages, which scope) and suggest running the Paraglide compile step (usually part of dev/build).
+2. Call get_translation_batch with { ${batchArgs} } once to get the first batch. Omit batchSize to use the default; raise it for short UI strings (fewer round-trips), or lower it for long, nuanced prose so each item gets full attention.
+3. Loop until \`done\` is true:
+   a. Translate each item's \`source\` into the target locale, preserving every placeholder listed in \`placeholders\`.
+   b. Call get_translation_batch again with { ${fusedArgs} }, passing the translations you just produced. The server saves them (same validation as save_translations) and returns the next batch in the same response — so the final batch is saved by the call that reports \`done: true\`. Keep batchSize/sourceLocale the same across the loop.
+   c. Check \`allSaved\`: if false, an item in \`saveResults\` was rejected and not written. Fix it and re-save (it also reappears in a later batch), or call save_translations directly for just that item.
+4. When \`done\` is true and \`allSaved\` (no failures), report a short summary (how many messages, which scope) and suggest running the Paraglide compile step (usually part of dev/build).
 
 ${translationRules(options)}`;
 }
@@ -237,13 +239,14 @@ function orchestrateWorkflow(args: {
 	]
 		.filter(Boolean)
 		.join(", ");
+	const subagentFusedArgs = [subagentBatchArgs, "translations: [...]"].join(", ");
 
 	return `Translate all missing messages${scope} into ${targets} using the paraglide-messages-mcp tools, with one subagent per locale running in parallel. You are the orchestrator: establish the translation style once, delegate the translation, and verify the result. Locales live in separate files and the translate tools only read/write the source and target locale, so per-locale subagents cannot interfere with each other.
 
 Workflow:
 1. Call project_info for the base locale, target locales, and per-locale missing counts. Skip locales with 0 missing messages.
 2. Establish the style brief BEFORE delegating. Use project_info.translationStyle when present; otherwise ask the user for a brief covering tone and voice, formality/address per target language where the language forces a choice, recurring product terms, and terms that stay untranslated. Do not infer style from existing translations.
-3. Spawn one subagent per target locale, all in parallel. Give each subagent: the style brief verbatim, its single target locale, and these instructions — loop until \`done\` is true: call get_translation_batch with { ${subagentBatchArgs} } (omit batchSize for the default; lower it for long, nuanced prose, raise it for short UI strings), translate every item preserving its \`placeholders\`, save with save_translations, passing the same sourceLocale if the batch call used one, fix per-item errors from \`results\` and re-save only those before continuing. Translate only your own locale; never touch others.
+3. Spawn one subagent per target locale, all in parallel. Give each subagent: the style brief verbatim, its single target locale, and these instructions — call get_translation_batch with { ${subagentBatchArgs} } once to prime (omit batchSize for the default; lower it for long, nuanced prose, raise it for short UI strings), then loop until \`done\` is true: translate every item preserving its \`placeholders\`, then call get_translation_batch again with { ${subagentFusedArgs} } passing the translations you just produced — this saves them and returns the next batch in one call, so the final batch is saved by the call that reports \`done\`. Keep batchSize/sourceLocale the same across the loop. Check \`allSaved\`: if false, fix the rejected items in \`saveResults\` and re-save them (or via save_translations) before continuing. Translate only your own locale; never touch others.
 4. When all subagents are done, call project_info again and confirm \`missing\` is 0 for every target locale${args.prefix ? " (within the prefix, via list_message_keys)" : ""}. Re-dispatch a subagent for any locale that still has missing messages.
 5. Report a summary: the style brief you used, per-locale message counts, anything subagents flagged as ambiguous, and suggest running the Paraglide compile step (usually part of dev/build).
 
@@ -264,6 +267,7 @@ function retranslateWorkflow(args: {
 		'targetLocale: "<locale>"',
 		args.prefix ? `prefix: "${args.prefix}"` : null,
 		'after: "<nextCursor from the previous call, omit on the first>"',
+		"translations: [...]  (your translations for the page you just received; omit on the first call)",
 	]
 		.filter(Boolean)
 		.join(", ");
@@ -273,7 +277,7 @@ function retranslateWorkflow(args: {
 Workflow:
 1. Call project_info for the base locale and target locales. Retranslate every target locale unless the user narrowed the set — a partial run leaves the other locales stale, which defeats the point.
 2. Establish the style brief BEFORE delegating. Use project_info.translationStyle when present; otherwise ask the user for a brief covering tone and voice, formality/address choices, recurring product terms, and terms that stay untranslated. Do not infer style from existing translations. If the retranslation was prompted by a specific change (new terminology, reworded source copy), state it in the brief so every subagent applies it.
-3. Spawn one subagent per target locale, all in parallel. Give each subagent: the style brief verbatim, its single target locale, and these instructions — loop until \`hasMore\` is false: call get_retranslation_batch with { ${subagentBatchArgs} }, produce a fresh translation for every item per the brief (each item's \`existingTarget\` shows the current value; when it already fits the brief you may keep it by skipping the item — skipped items don't stall the loop, the cursor moves regardless), save the rest with save_translations (it overwrites existing values), passing the same sourceLocale if the batch call used one, fix per-item errors from \`results\` and re-save only those before continuing with \`after: nextCursor\`. Translate only your own locale; never touch others.
+3. Spawn one subagent per target locale, all in parallel. Give each subagent: the style brief verbatim, its single target locale, and these instructions — each call carries the previous page's work forward: call get_retranslation_batch with { ${subagentBatchArgs} }, which first saves the translations you pass (it overwrites existing values), then returns the next page. So: call once to prime (no \`translations\`), then for each page produce a fresh translation per the brief (each item's \`existingTarget\` shows the current value; an item already fitting the brief may be skipped by omitting it — the cursor still advances), and pass those translations on the next call together with \`after: nextCursor\`. When a page comes back with \`hasMore: false\`, that is the last page: save it with save_translations (there is no further page to fetch). Keep batchSize/sourceLocale the same across the loop; check \`allSaved\` and re-save any rejected item from \`saveResults\` (it is past the cursor, so re-save it rather than waiting for it to reappear). Translate only your own locale; never touch others.
 4. When all subagents are done, confirm coverage: each subagent's first batch reports \`total\` (the keys in its scope) — check every subagent walked its full scope (last call had \`hasMore: false\`). Re-dispatch a subagent for any locale that stopped early.
 5. Report a summary: the style brief you used, per-locale counts of retranslated vs. kept-as-is messages, anything subagents flagged as ambiguous, and suggest running the Paraglide compile step (usually part of dev/build).
 

@@ -23,8 +23,14 @@ import {
 	type RemoveOrphansSummary,
 	type RenameSummary,
 } from "./mutate.js";
-import { validateBatch, summarizeSave, type SaveSummary } from "./save.js";
-import { mutateKeys, readSnapshot } from "./storage.js";
+import {
+	runSave,
+	withAccepted,
+	type SaveArgs,
+	type SaveFields,
+	type SaveSummary,
+} from "./save.js";
+import { mutateKeys, readSnapshot, type ProjectSnapshot } from "./storage.js";
 import type {
 	MessageValue,
 	ProjectInfo,
@@ -109,22 +115,35 @@ export class TranslationService {
 		sourceLocale?: string;
 		prefix?: string;
 		batchSize?: number;
+		translations?: TranslationInput[];
+		allowNewKeys?: boolean;
+		skipValidation?: boolean;
 	}): {
 		targetLocale: string;
 		sourceLocale: string;
 		items: TranslationItem[];
 		remaining: number;
 		done: boolean;
-	} {
+		nextStep?: string;
+	} & Partial<SaveFields> {
+		const advance = (context: ProjectSnapshot) =>
+			nextTranslationBatch(context, {
+				targetLocale: args.targetLocale,
+				sourceLocale: args.sourceLocale,
+				prefix: args.prefix,
+				batchSize: args.batchSize,
+			});
+
+		// Autosave path: persist the submitted batch, then page the next one
+		// from the post-save state, so the final batch is saved by the same
+		// call that reports `done`.
+		if (args.translations && args.translations.length > 0) {
+			return this.saveAndAdvance(toSaveArgs(args, args.translations), advance);
+		}
+
 		// per-locale operation: only the source and target files are loaded,
 		// so concurrent per-locale agents never read each other's locales
-		const context = readSnapshot(this.projectPath, {
-			onlyLocales: [
-				args.targetLocale,
-				...(args.sourceLocale ? [args.sourceLocale] : []),
-			],
-		});
-		return nextTranslationBatch(context, args);
+		return advance(this.readScoped(args.targetLocale, args.sourceLocale));
 	}
 
 	getRetranslationBatch(args: {
@@ -133,6 +152,9 @@ export class TranslationService {
 		prefix?: string;
 		batchSize?: number;
 		after?: string;
+		translations?: TranslationInput[];
+		allowNewKeys?: boolean;
+		skipValidation?: boolean;
 	}): {
 		targetLocale: string;
 		sourceLocale: string;
@@ -140,26 +162,28 @@ export class TranslationService {
 		total: number;
 		hasMore: boolean;
 		nextCursor?: string;
-	} {
+		nextStep?: string;
+	} & Partial<SaveFields> {
 		// per-locale operation, like getTranslationBatch — scope includes keys
 		// that already have a translation, paged by cursor (saving does not
 		// shrink the scope, so remaining/done cannot signal progress here)
-		const context = readSnapshot(this.projectPath, {
-			onlyLocales: [
-				args.targetLocale,
-				...(args.sourceLocale ? [args.sourceLocale] : []),
-			],
-		});
-		return nextRetranslationBatch(context, args);
+		const advance = (context: ProjectSnapshot) =>
+			nextRetranslationBatch(context, {
+				targetLocale: args.targetLocale,
+				sourceLocale: args.sourceLocale,
+				prefix: args.prefix,
+				batchSize: args.batchSize,
+				after: args.after,
+			});
+
+		if (args.translations && args.translations.length > 0) {
+			return this.saveAndAdvance(toSaveArgs(args, args.translations), advance);
+		}
+
+		return advance(this.readScoped(args.targetLocale, args.sourceLocale));
 	}
 
-	saveTranslations(args: {
-		targetLocale: string;
-		sourceLocale?: string;
-		translations: TranslationInput[];
-		allowNewKeys?: boolean;
-		skipValidation?: boolean;
-	}): SaveSummary {
+	saveTranslations(args: SaveArgs): SaveSummary {
 		if (args.translations.length === 0) {
 			throw new Error("translations must not be empty");
 		}
@@ -168,25 +192,61 @@ export class TranslationService {
 		return mutateKeys(
 			this.projectPath,
 			(context) => {
-				const { results, accepted } = validateBatch(context, args);
+				const { accepted, summary } = runSave(context, args);
 				return {
 					deletions: [],
 					additions: { [args.targetLocale]: accepted },
-					result: summarizeSave(
-						context,
-						args.targetLocale,
-						args.sourceLocale,
-						results,
-						accepted
-					),
+					result: summary,
 				};
 			},
-			{
-				onlyLocales: [
-					args.targetLocale,
-					...(args.sourceLocale ? [args.sourceLocale] : []),
-				],
-			}
+			this.localeScope(args.targetLocale, args.sourceLocale)
+		);
+	}
+
+	/** Loads a snapshot scoped to a per-locale (target + optional source) read. */
+	private readScoped(
+		targetLocale: string,
+		sourceLocale?: string
+	): ProjectSnapshot {
+		return readSnapshot(this.projectPath, this.localeScope(targetLocale, sourceLocale));
+	}
+
+	private localeScope(targetLocale: string, sourceLocale?: string) {
+		return {
+			onlyLocales: [targetLocale, ...(sourceLocale ? [sourceLocale] : [])],
+		};
+	}
+
+	/**
+	 * Saves a submitted batch and pages the next one in a single atomic
+	 * mutation: `advance` runs against the post-save snapshot, and the save
+	 * outcome is merged into its result. Shared by the translate and
+	 * retranslate batch tools.
+	 */
+	private saveAndAdvance<T extends Record<string, unknown>>(
+		args: SaveArgs,
+		advance: (postSaveContext: ProjectSnapshot) => T
+	): T & SaveFields {
+		return mutateKeys(
+			this.projectPath,
+			(context) => {
+				const { results, accepted, summary } = runSave(context, args);
+				const batch = advance(
+					withAccepted(context, args.targetLocale, accepted)
+				);
+				return {
+					deletions: [],
+					additions: { [args.targetLocale]: accepted },
+					result: {
+						...batch,
+						saved: summary.saved,
+						failed: summary.failed,
+						saveResults: results,
+						allSaved: summary.failed === 0,
+					},
+				};
+			},
+			this.localeScope(args.targetLocale, args.sourceLocale)
 		);
 	}
 
@@ -254,4 +314,23 @@ export class TranslationService {
 		).length;
 		return { ...removeLocale(this.projectPath, args.locale), discardedTranslations };
 	}
+}
+
+/** Builds the save core's args from a batch call's autosave inputs. */
+function toSaveArgs(
+	args: {
+		targetLocale: string;
+		sourceLocale?: string;
+		allowNewKeys?: boolean;
+		skipValidation?: boolean;
+	},
+	translations: TranslationInput[]
+): SaveArgs {
+	return {
+		targetLocale: args.targetLocale,
+		sourceLocale: args.sourceLocale,
+		translations,
+		allowNewKeys: args.allowNewKeys,
+		skipValidation: args.skipValidation,
+	};
 }

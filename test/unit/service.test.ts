@@ -354,6 +354,129 @@ describe("getTranslationBatch", () => {
 	it("rejects equal source and target locales", async () => {
 		expect(() => service.getTranslationBatch({ targetLocale: "en" })).toThrow(/must differ/);
 	});
+
+	it("hints to call again while messages remain, and drops the hint when done", async () => {
+		const more = await service.getTranslationBatch({
+			targetLocale: "de",
+			batchSize: 2,
+		});
+		expect(more.done).toBe(false);
+		expect(more.nextStep).toMatch(/call get_translation_batch again/);
+
+		const done = await service.getTranslationBatch({
+			targetLocale: "de",
+			prefix: "no_such_prefix_",
+		});
+		expect(done.done).toBe(true);
+		expect(done.nextStep).toBeUndefined();
+	});
+
+	describe("autosave (fused save + fetch)", () => {
+		it("saves the submitted batch and returns the next one from post-save state", async () => {
+			const first = await service.getTranslationBatch({
+				targetLocale: "de",
+				batchSize: 2,
+			});
+			expect(first.items.map((i) => i.key)).toEqual([
+				"checkout_button_cancel",
+				"checkout_button_pay",
+			]);
+			expect(first.saved).toBeUndefined(); // priming call did not save
+
+			const second = await service.getTranslationBatch({
+				targetLocale: "de",
+				batchSize: 2,
+				translations: first.items.map((i) => ({
+					key: i.key,
+					value: `DE:${i.source as string}`,
+				})),
+			});
+			// the two just-saved keys are persisted...
+			expect(second.saved).toBe(2);
+			expect(second.failed).toBe(0);
+			expect(second.allSaved).toBe(true);
+			expect(fixture.readMessages("de").checkout_button_cancel).toBe(
+				"DE:Cancel"
+			);
+			// ...and excluded from the next batch / remaining count
+			expect(second.items.map((i) => i.key)).toEqual([
+				"checkout_title",
+				"inbox_count",
+			]);
+			expect(second.remaining).toBe(2);
+		});
+
+		it("autosaves the final batch in the same call that reports done", async () => {
+			const batch = await service.getTranslationBatch({
+				targetLocale: "de",
+				prefix: "checkout_",
+				batchSize: 10,
+			});
+			const done = await service.getTranslationBatch({
+				targetLocale: "de",
+				prefix: "checkout_",
+				batchSize: 10,
+				translations: batch.items.map((i) => ({
+					key: i.key,
+					value: `DE:${i.source as string}`,
+				})),
+			});
+			expect(done.saved).toBe(3);
+			expect(done.allSaved).toBe(true);
+			expect(done.done).toBe(true);
+			expect(done.items).toEqual([]);
+			expect(fixture.readMessages("de").checkout_title).toBe("DE:Checkout");
+		});
+
+		it("flags allSaved=false when an item is rejected, keeping it in the next batch", async () => {
+			const next = await service.getTranslationBatch({
+				targetLocale: "de",
+				batchSize: 10,
+				translations: [
+					{ key: "checkout_button_cancel", value: "Abbrechen" },
+					// invented placeholder -> rejected, never written
+					{ key: "checkout_button_pay", value: "Zahle {amount}" },
+				],
+			});
+			expect(next.saved).toBe(1);
+			expect(next.failed).toBe(1);
+			expect(next.allSaved).toBe(false);
+			expect(
+				next.saveResults?.find((r) => r.key === "checkout_button_pay")?.status
+			).toBe("error");
+			expect(fixture.readMessages("de").checkout_button_cancel).toBe(
+				"Abbrechen"
+			);
+			expect(fixture.readMessages("de").checkout_button_pay).toBeUndefined();
+			// the rejected key was not saved, so it resurfaces for another attempt
+			expect(next.items.map((i) => i.key)).toContain("checkout_button_pay");
+		});
+
+		it("drives the whole loop with one call per iteration", async () => {
+			let batch = await service.getTranslationBatch({
+				targetLocale: "de",
+				batchSize: 2,
+			});
+			let guard = 0;
+			while (!batch.done) {
+				if (++guard > 10) throw new Error("loop did not converge");
+				batch = await service.getTranslationBatch({
+					targetLocale: "de",
+					batchSize: 2,
+					translations: batch.items.map((item) => ({
+						key: item.key,
+						value:
+							typeof item.source === "string"
+								? `DE:${item.source}`
+								: item.source,
+					})),
+				});
+				expect(batch.allSaved).toBe(true);
+			}
+			const info = await service.projectInfo();
+			expect(info.missing.de).toBe(0);
+		});
+	});
 });
 
 describe("getRetranslationBatch", () => {
@@ -505,6 +628,56 @@ describe("getRetranslationBatch", () => {
 		expect(() =>
 			service.getRetranslationBatch({ targetLocale: "en" })
 		).toThrow(/must differ/);
+	});
+
+	it("hints to page on while more pages remain, and drops the hint on the last page", async () => {
+		const more = await service.getRetranslationBatch({
+			targetLocale: "de",
+			batchSize: 4,
+		});
+		expect(more.hasMore).toBe(true);
+		expect(more.nextStep).toMatch(/get_retranslation_batch again with after: "greeting"/);
+
+		const last = await service.getRetranslationBatch({
+			targetLocale: "de",
+			batchSize: 10,
+		});
+		expect(last.hasMore).toBe(false);
+		expect(last.nextStep).toBeUndefined();
+	});
+
+	it("autosaves the submitted page while advancing the cursor (one call per iteration)", async () => {
+		let batch = await service.getRetranslationBatch({
+			targetLocale: "de",
+			batchSize: 2,
+		});
+		let after: string | undefined = batch.nextCursor;
+		let guard = 0;
+		for (;;) {
+			if (++guard > 10) throw new Error("loop did not converge");
+			const translations = batch.items.map((item) => ({
+				key: item.key,
+				value:
+					typeof item.source === "string" ? `DE:${item.source}` : item.source,
+			}));
+			const hadMore = batch.hasMore;
+			batch = await service.getRetranslationBatch({
+				targetLocale: "de",
+				batchSize: 2,
+				...(after !== undefined && { after }),
+				translations,
+			});
+			expect(batch.allSaved).toBe(true);
+			if (!hadMore) break;
+			after = batch.nextCursor;
+		}
+
+		const deFile = fixture.readMessages("de");
+		// existing values overwritten and gaps filled in the fused pass
+		expect(deFile.greeting).toBe("DE:Hello {name}!");
+		expect(deFile.checkout_title).toBe("DE:Checkout");
+		const info = await service.projectInfo();
+		expect(info.missing.de).toBe(0);
 	});
 });
 

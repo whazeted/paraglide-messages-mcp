@@ -268,6 +268,7 @@ export function nextTranslationBatch(
 	items: TranslationItem[];
 	remaining: number;
 	done: boolean;
+	nextStep?: string;
 } {
 	const { snapshot } = context;
 	const { targetLocale, sourceLocale } = resolveSourceTarget(context, args);
@@ -291,6 +292,9 @@ export function nextTranslationBatch(
 		),
 		remaining,
 		done: remaining === 0,
+		...(remaining > 0 && {
+			nextStep: `${remaining} message${remaining === 1 ? "" : "s"} still untranslated — call get_translation_batch again to continue (pass this batch's translations so they are saved and the next batch is returned).`,
+		}),
 	};
 }
 
@@ -321,6 +325,7 @@ export function nextRetranslationBatch(
 	total: number;
 	hasMore: boolean;
 	nextCursor?: string;
+	nextStep?: string;
 } {
 	const { snapshot } = context;
 	const { targetLocale, sourceLocale } = resolveSourceTarget(context, args);
@@ -340,6 +345,7 @@ export function nextRetranslationBatch(
 		}
 	}
 
+	const nextCursor = hasMore ? page[page.length - 1] : undefined;
 	return {
 		targetLocale,
 		sourceLocale,
@@ -348,7 +354,10 @@ export function nextRetranslationBatch(
 		),
 		total,
 		hasMore,
-		nextCursor: hasMore ? page[page.length - 1] : undefined,
+		nextCursor,
+		...(hasMore && {
+			nextStep: `More messages to retranslate — call get_retranslation_batch again with after: "${nextCursor}" (pass this page's translations so they are saved before the next page).`,
+		}),
 	};
 }
 

@@ -54,7 +54,11 @@ Principles, in dependency order:
 2. **Scoped I/O for the translate loop.** `get_translation_batch` and
    `save_translations` load only the source and target locale; saves write
    only the target file. That is what makes one-agent-per-locale parallelism
-   conflict-free.
+   conflict-free. The batch tools optionally fold a save into the same call
+   (autosave) so a round trip translates one batch and fetches the next; the
+   save core ([save.ts](src/core/save.ts) `runSave`) is shared with the
+   standalone `save_translations`, and the next batch is paged over the
+   post-save snapshot (`withAccepted`).
 3. **Stat-validated, write-through file cache** (direct.ts). Every read
    stats the file (mtime + size) and re-parses only on change; saves update
    the cache in place. Concurrent agents share one parsed copy of the base
@@ -122,14 +126,24 @@ validation and the unknown-key guard still apply.
 ```
 project_info  +  startup/user style brief (tone, formality, glossary)
 └─ one (sub)agent per target locale, in parallel:
-   ┌─> get_translation_batch { targetLocale: "de", batchSize: 50 }
+   ┌─> get_translation_batch { targetLocale: "de", batchSize: 50 }   (prime)
    │   ... agent translates the items ...
-   │   save_translations { targetLocale: "de", translations: [...] }
-   └── repeat until done == true
+   │   get_translation_batch { targetLocale: "de", translations: [...] }
+   │     └─ autosaves the batch AND returns the next one in one call
+   └── repeat until done == true (the last batch is saved by the done call)
 ```
 
+The fused call halves round trips: a single `get_translation_batch` with
+`translations` saves what the agent just produced and returns the next batch,
+so the final batch is persisted by the same call that reports `done`. The
+result carries the save outcome (`saved`/`failed`/`saveResults`) plus
+`allSaved` — the one flag an agent checks to confirm its work landed. The
+standalone `save_translations` is kept (for re-saving rejected items, or
+clients that prefer an explicit step) and shares the same save core.
+
 Per-item validation is what makes large batches safe: a bad translation is
-rejected individually while the rest of the batch is saved, and the agent
+rejected individually while the rest of the batch is saved (a rejected item
+leaves `allSaved` false and reappears in a later batch), and the agent
 re-submits only the failures. Scope work to a catalog subsection with
 `prefix` (e.g. `"checkout_"`). The `translate_project` prompt encodes the
 full fan-out workflow including the startup/user-provided style brief.
