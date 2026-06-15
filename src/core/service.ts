@@ -18,7 +18,9 @@ import {
 import {
 	planDeleteMessages,
 	planRenameMessage,
+	planRemoveOrphanMessages,
 	type DeleteSummary,
+	type RemoveOrphansSummary,
 	type RenameSummary,
 } from "./mutate.js";
 import { validateBatch, summarizeSave, type SaveSummary } from "./save.js";
@@ -153,6 +155,7 @@ export class TranslationService {
 
 	saveTranslations(args: {
 		targetLocale: string;
+		sourceLocale?: string;
 		translations: TranslationInput[];
 		allowNewKeys?: boolean;
 		skipValidation?: boolean;
@@ -160,7 +163,8 @@ export class TranslationService {
 		if (args.translations.length === 0) {
 			throw new Error("translations must not be empty");
 		}
-		// per-locale operation: reads base + target only, writes the target file
+		// per-locale operation: scopes reads to the target plus explicit source,
+		// and writes only the target file.
 		return mutateKeys(
 			this.projectPath,
 			(context) => {
@@ -168,10 +172,21 @@ export class TranslationService {
 				return {
 					deletions: [],
 					additions: { [args.targetLocale]: accepted },
-					result: summarizeSave(context, args.targetLocale, results, accepted),
+					result: summarizeSave(
+						context,
+						args.targetLocale,
+						args.sourceLocale,
+						results,
+						accepted
+					),
 				};
 			},
-			{ onlyLocales: [args.targetLocale] }
+			{
+				onlyLocales: [
+					args.targetLocale,
+					...(args.sourceLocale ? [args.sourceLocale] : []),
+				],
+			}
 		);
 	}
 
@@ -183,6 +198,37 @@ export class TranslationService {
 			const { deletions, summary } = planDeleteMessages(context, args.keys);
 			return { deletions, additions: {}, result: summary };
 		});
+	}
+
+	removeOrphanMessages(args: {
+		sourceLocale?: string;
+		targetLocales?: string[];
+		prefix?: string;
+	}): RemoveOrphansSummary {
+		const readOptions = args.targetLocales
+			? {
+					onlyLocales: [
+						...(args.sourceLocale ? [args.sourceLocale] : []),
+						...args.targetLocales,
+					],
+				}
+			: undefined;
+		return mutateKeys(
+			this.projectPath,
+			(context) => {
+				const { localeDeletions, summary } = planRemoveOrphanMessages(
+					context,
+					args
+				);
+				return {
+					deletions: [],
+					localeDeletions,
+					additions: {},
+					result: summary,
+				};
+			},
+			readOptions
+		);
 	}
 
 	renameMessage(args: {

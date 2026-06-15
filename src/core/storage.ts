@@ -31,11 +31,14 @@ export interface ReadOptions {
 /**
  * What a mutation decides to persist, plus the value to return to the
  * caller. Covers every write the tools need: saves are additions to one
- * locale, deletes are key removals across all locales, renames are both.
+ * locale, global deletes/renames remove keys across all loaded locales, and
+ * localeDeletions remove keys from specific locale files only.
  */
 export interface KeyMutationPlan<T> {
 	/** keys to remove from every locale (may be empty) */
 	deletions: string[];
+	/** per-locale keys to remove (may be omitted) */
+	localeDeletions?: Record<string, string[]>;
 	/** per-locale `key -> value` entries to write (may be empty) */
 	additions: Record<string, LocaleMessages>;
 	result: T;
@@ -94,14 +97,14 @@ export function mutateKeys<T>(
 		locales: project.locales,
 		snapshot: readDirectSnapshot(project, locales),
 	};
-	const { deletions, additions, result } = plan(context);
+	const { deletions, localeDeletions, additions, result } = plan(context);
 	for (const locale of locales) {
 		mutateDirectLocale(
 			project,
 			locale,
 			context.snapshot[locale] ?? {},
 			additions[locale] ?? {},
-			deletions
+			[...deletions, ...(localeDeletions?.[locale] ?? [])]
 		);
 	}
 	return result;

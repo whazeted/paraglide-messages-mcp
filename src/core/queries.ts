@@ -17,20 +17,35 @@ export function computeProjectInfo(
 ): ProjectInfo {
 	const { baseLocale, locales, snapshot } = context;
 	const allKeys = new Set<string>();
+	const translatableKeys = new Set<string>();
+
+	for (const [key, value] of Object.entries(snapshot[baseLocale] ?? {})) {
+		allKeys.add(key);
+		if (!isEmptyValue(value)) translatableKeys.add(key);
+	}
 
 	const translated: Record<string, number> = {};
+	const extraKeys: Record<string, number> = {};
 	for (const locale of locales) {
 		let count = 0;
+		let extra = 0;
 		for (const [key, value] of Object.entries(snapshot[locale] ?? {})) {
 			allKeys.add(key);
-			if (!isEmptyValue(value)) count++;
+			if (isEmptyValue(value)) continue;
+			count++;
+			if (!translatableKeys.has(key)) extra++;
 		}
 		translated[locale] = count;
+		extraKeys[locale] = extra;
 	}
 
 	const missing: Record<string, number> = {};
 	for (const locale of locales) {
-		missing[locale] = allKeys.size - (translated[locale] ?? 0);
+		let count = 0;
+		for (const key of translatableKeys) {
+			if (isEmptyValue(snapshot[locale]?.[key])) count++;
+		}
+		missing[locale] = count;
 	}
 
 	return {
@@ -39,8 +54,10 @@ export function computeProjectInfo(
 		locales,
 		pluginKey: MESSAGE_FORMAT_PLUGIN_KEY,
 		totalKeys: allKeys.size,
+		translatableKeys: translatableKeys.size,
 		translated,
 		missing,
+		extraKeys,
 	};
 }
 
@@ -59,7 +76,7 @@ export function queryKeys(
 	hasMore: boolean;
 	nextCursor?: string;
 } {
-	const { locales, snapshot } = context;
+	const { baseLocale, locales, snapshot } = context;
 
 	const locale = args.locale;
 	if (locale && !locales.includes(locale)) {
@@ -78,6 +95,7 @@ export function queryKeys(
 		matches: (key) => {
 			if (args.prefix && !key.startsWith(args.prefix)) return false;
 			if (!locale || status === "all") return true;
+			if (isEmptyValue(snapshot[baseLocale]?.[key])) return false;
 			const empty = isEmptyValue(snapshot[locale]?.[key]);
 			return status === "missing" ? empty : !empty;
 		},

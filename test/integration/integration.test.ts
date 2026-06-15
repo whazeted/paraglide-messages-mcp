@@ -62,9 +62,11 @@ describe("large paraglide project", () => {
 		expect(info.baseLocale).toBe("en");
 		expect(info.locales).toEqual(["en", ...LARGE_FIXTURE_TARGET_LOCALES]);
 		expect(info.totalKeys).toBe(fixture.messageCount);
+		expect(info.translatableKeys).toBe(fixture.messageCount);
 		expect(info.translated.en).toBe(fixture.messageCount);
 		for (const locale of LARGE_FIXTURE_TARGET_LOCALES) {
 			expect(info.missing[locale]).toBe(fixture.messageCount);
+			expect(info.extraKeys[locale]).toBe(0);
 		}
 	});
 
@@ -176,9 +178,11 @@ describe("large paraglide project", () => {
 		// the stateless server picks the reset up immediately
 		const info = await service.projectInfo();
 		expect(info.translated.en).toBe(fixture.messageCount);
+		expect(info.translatableKeys).toBe(fixture.messageCount);
 		for (const locale of LARGE_FIXTURE_TARGET_LOCALES) {
 			expect(info.missing[locale]).toBe(fixture.messageCount);
 			expect(info.translated[locale]).toBe(0);
+			expect(info.extraKeys[locale]).toBe(0);
 		}
 	});
 });

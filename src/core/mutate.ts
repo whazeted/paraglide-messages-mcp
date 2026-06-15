@@ -1,7 +1,8 @@
 import { collectKeys, type ProjectSnapshot } from "./storage.js";
+import { unknownLocaleError } from "./queries.js";
 import type { DeleteResultItem, LocaleMessages } from "./types.js";
 
-/** Validation and result-building for delete_messages and rename_message. */
+/** Validation and result-building for key mutation tools. */
 
 // type aliases (not interfaces) so they satisfy the MCP SDK's
 // Record<string, unknown> constraint on structuredContent
@@ -16,6 +17,17 @@ export type RenameSummary = {
 	newKey: string;
 	/** locales that had a value under the old key and were rewritten */
 	updatedLocales: string[];
+};
+
+export type RemoveOrphansSummary = {
+	sourceLocale: string;
+	targetLocales: string[];
+	results: Array<{
+		locale: string;
+		deleted: number;
+		keys: string[];
+	}>;
+	deleted: number;
 };
 
 /**
@@ -107,4 +119,72 @@ export function planRenameMessage(
 	}
 
 	return { additions, summary: { key, newKey, updatedLocales } };
+}
+
+/**
+ * Finds keys present in target locale files but absent from the source locale
+ * file, returning per-locale deletions. An empty source value still counts as
+ * present; this tool removes true target-only keys, not untranslated source
+ * keys.
+ */
+export function planRemoveOrphanMessages(
+	context: ProjectSnapshot,
+	args: {
+		sourceLocale?: string;
+		targetLocales?: string[];
+		prefix?: string;
+	}
+): {
+	localeDeletions: Record<string, string[]>;
+	summary: RemoveOrphansSummary;
+} {
+	const sourceLocale = args.sourceLocale ?? context.baseLocale;
+	if (!context.locales.includes(sourceLocale)) {
+		throw unknownLocaleError(sourceLocale, context.locales);
+	}
+
+	const targetLocales = args.targetLocales ?? context.locales.filter(
+		(locale) => locale !== sourceLocale
+	);
+	if (targetLocales.length === 0) {
+		throw new Error("targetLocales must include at least one locale");
+	}
+	const seen = new Set<string>();
+	for (const locale of targetLocales) {
+		if (!context.locales.includes(locale)) {
+			throw unknownLocaleError(locale, context.locales);
+		}
+		if (locale === sourceLocale) {
+			throw new Error("targetLocales must not include sourceLocale");
+		}
+		if (seen.has(locale)) {
+			throw new Error(`duplicate target locale "${locale}"`);
+		}
+		seen.add(locale);
+	}
+
+	const sourceKeys = new Set(Object.keys(context.snapshot[sourceLocale] ?? {}));
+	const localeDeletions: Record<string, string[]> = {};
+	const results: RemoveOrphansSummary["results"] = [];
+
+	for (const locale of targetLocales) {
+		const keys = Object.keys(context.snapshot[locale] ?? {})
+			.filter((key) => !sourceKeys.has(key))
+			.filter((key) => (args.prefix ? key.startsWith(args.prefix) : true))
+			.sort();
+		if (keys.length > 0) {
+			localeDeletions[locale] = keys;
+		}
+		results.push({ locale, deleted: keys.length, keys });
+	}
+
+	return {
+		localeDeletions,
+		summary: {
+			sourceLocale,
+			targetLocales,
+			results,
+			deleted: results.reduce((sum, result) => sum + result.deleted, 0),
+		},
+	};
 }

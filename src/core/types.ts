@@ -47,13 +47,18 @@ export type ProjectInfo = {
 	baseLocale: string;
 	locales: string[];
 	pluginKey: string;
+	/** count of keys present in any locale, including non-source/orphan keys */
 	totalKeys: number;
+	/** count of non-empty base-locale keys eligible for translation */
+	translatableKeys: number;
 	/** Linguistic style brief configured at server startup, if any. */
 	translationStyle?: string;
 	/** per locale: number of keys that have a non-empty message */
 	translated: Record<string, number>;
-	/** per locale: number of keys missing or empty */
+	/** per locale: translatable base-locale keys missing or empty in this locale */
 	missing: Record<string, number>;
+	/** per locale: non-empty keys ignored by the translate loop because the base value is empty/missing */
+	extraKeys: Record<string, number>;
 };
 
 export interface TranslationItem {

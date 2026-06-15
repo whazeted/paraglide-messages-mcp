@@ -79,19 +79,21 @@ export function removeLocale(
 		);
 	}
 
-	// delete the message file first (while the locale is still resolvable),
-	// then update settings
+	// Resolve the file while the locale is still in settings, but update
+	// settings before deleting translations so a failed settings write cannot
+	// leave the project pointing at a deleted locale file.
 	let messageFileDeleted = false;
 	const direct = parseDirectProject(projectPath, settings);
 	const filePath = direct.fileFor(tag);
-	if (nodeFs.existsSync(filePath)) {
-		nodeFs.rmSync(filePath);
-		messageFileDeleted = true;
-	}
 
 	const next = locales.filter((l) => l !== tag);
 	settings.locales = next;
 	writeSettings(settingsPath, settings);
+
+	if (nodeFs.existsSync(filePath)) {
+		nodeFs.rmSync(filePath);
+		messageFileDeleted = true;
+	}
 
 	return { locale: tag, locales: next, messageFileDeleted };
 }

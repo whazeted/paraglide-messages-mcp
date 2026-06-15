@@ -60,7 +60,7 @@ translate every locale at once with one subagent per locale.
 
 | Tool | Purpose |
 | --- | --- |
-| `project_info` | Locales, base locale, per-locale translated/missing counts, and the startup translation style brief when configured. |
+| `project_info` | Locales, base locale, `totalKeys` across all locales, `translatableKeys` from non-empty base messages, per-locale translated/missing counts, extra non-source keys, and the startup translation style brief when configured. |
 | `get_translation_batch` | Next batch of untranslated messages for a locale (default 50), with source text and required placeholders. |
 | `get_retranslation_batch` | Cursor-paged batch over *already-translated* messages too — refresh stale entries after source/terminology changes. |
 | `save_translations` | Validate and persist translations for one locale; per-item results — overwrites existing values. |
@@ -68,6 +68,7 @@ translate every locale at once with one subagent per locale.
 | `get_messages` | Full message content by keys or prefix. |
 | `search_messages` | Find messages by text or key substring. |
 | `delete_messages` / `rename_message` | Key management across all locales. |
+| `remove_orphan_messages` | Delete target-locale keys that are absent from the source locale (base locale by default), optionally scoped by locale or prefix. |
 | `add_locale` / `remove_locale` | Locale management in `settings.json`. |
 
 ## Prompts

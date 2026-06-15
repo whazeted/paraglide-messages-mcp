@@ -141,6 +141,16 @@ cursor (`after: nextCursor` until `hasMore` is false) instead of checking
 `done`; the `retranslate` prompt fans it out across every target locale by
 default so no locale is left stale (see DECISIONS.md #14).
 
+`project_info.missing` must match the translate loop's scope: it counts only
+non-empty base-locale keys whose target value is empty or absent. `totalKeys`
+still reports the union of keys found in any locale for audit visibility,
+`translatableKeys` reports the non-empty base-locale key count, and
+`extraKeys` reports per-locale non-empty values ignored by the translate loop
+because the base value is empty or missing.
+Use `remove_orphan_messages` to delete true target-only keys: keys present in
+target locale files and absent from the chosen source locale. Empty source
+values still count as existing, so they are not removed as orphans.
+
 ## Benchmarks
 
 Two suites, both building real fixture projects in the OS temp directory:

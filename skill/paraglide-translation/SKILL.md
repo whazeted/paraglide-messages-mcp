@@ -19,15 +19,17 @@ rejected on its own instead of sinking the call.
    translations. Confirm with the user which locale(s) and (optionally) which
    key prefix to work on if not already specified.
 2. Loop until `done` is true:
-   a. **`get_translation_batch`** with `targetLocale` (and `prefix` if
-      scoping). Omit `batchSize` to use the default (defined in
+   a. **`get_translation_batch`** with `targetLocale` (plus `sourceLocale`
+      if translating from a non-base locale, and `prefix` if scoping).
+      Omit `batchSize` to use the default (defined in
       `src/core/constants.ts`); raise it for short UI strings — fewer
       round-trips — or lower it for long, nuanced prose so each item gets
       full attention.
    b. Translate each item's `source` into the target locale.
-   c. **`save_translations`** with the same keys. The server validates each
-      item; check `results` for per-item errors, fix only the failed items,
-      and re-save them before moving on.
+   c. **`save_translations`** with the same keys and the same `sourceLocale`
+      when the batch used one. The server validates each item against that
+      source locale; check `results` for per-item errors, fix only the failed
+      items, and re-save them before moving on.
 3. When `remaining` is 0, report a short summary (how many messages, which
    locales). Suggest the user runs their Paraglide compile step (usually part
    of `dev`/`build`) if they want to see the result in the app.
@@ -78,7 +80,8 @@ Two things differ from the normal loop:
   `after: nextCursor` until `hasMore` is false. Each item's
   `existingTarget` shows the current value — when it already fits the
   brief you may keep it by simply skipping the item; the cursor moves on
-  regardless.
+  regardless. If `get_retranslation_batch` used `sourceLocale`, pass the
+  same `sourceLocale` to `save_translations`.
 
 State why the retranslation is happening (new terminology, reworded
 source, …) in the style brief so every locale applies the same change.
@@ -136,6 +139,9 @@ context or when you only need to inspect state, not change it.
 - To remove or rename messages, use `delete_messages` / `rename_message` —
   they update every locale at once. After a rename, remind the user to
   update code references to the old key.
+- To clean up stale target-only keys, use `remove_orphan_messages`. An orphan
+  is a key present in a target locale but absent from the source locale
+  (default: base locale); empty source values still count as existing.
 - To add or drop a whole locale, use `add_locale` / `remove_locale`. Match
   the tag convention the project already uses (check `project_info` —
   e.g. `es` vs `es-ES`). `remove_locale` permanently discards that locale's

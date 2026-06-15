@@ -160,6 +160,16 @@ describe("direct writes", () => {
 		expect(() => service.projectInfo()).toThrow(/invalid JSON/);
 	});
 
+	it("surfaces read errors for existing message paths instead of treating them as empty", () => {
+		const f = fixture();
+		const frPath = path.join(f.messagesDir, "fr.json");
+		fs.rmSync(frPath);
+		fs.mkdirSync(frPath);
+
+		const service = new TranslationService(f.projectPath);
+		expect(() => service.projectInfo()).toThrow(/cannot read message file/);
+	});
+
 	it("respects the plugin's sort setting", async () => {
 		const f = fixture();
 		patchSettings(f, (s) => {

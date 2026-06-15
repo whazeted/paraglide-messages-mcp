@@ -14,10 +14,13 @@ export function discoverProjectPath(args: {
 }): string {
 	if (args.explicitPath) {
 		const resolved = path.resolve(args.cwd, args.explicitPath);
-		if (!nodeFs.existsSync(resolved)) {
+		let stat: nodeFs.Stats;
+		try {
+			stat = nodeFs.statSync(resolved);
+		} catch {
 			throw new Error(`inlang project not found at ${resolved}`);
 		}
-		return resolved;
+		return stat.isFile() ? path.dirname(resolved) : resolved;
 	}
 
 	const defaultPath = path.join(args.cwd, "project.inlang");

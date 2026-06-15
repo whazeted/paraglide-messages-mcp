@@ -38,6 +38,15 @@ describe("discoverProjectPath", () => {
 		).toBe(fixture.projectPath);
 	});
 
+	it("normalizes an explicit settings file path to the project directory", () => {
+		expect(
+			discoverProjectPath({
+				cwd: fixture.rootDir,
+				explicitPath: "./project.inlang/settings.json",
+			})
+		).toBe(fixture.projectPath);
+	});
+
 	it("throws for a missing explicit path", () => {
 		expect(() =>
 			discoverProjectPath({ cwd: fixture.rootDir, explicitPath: "./nope" })
@@ -51,12 +60,71 @@ describe("projectInfo", () => {
 		expect(info.baseLocale).toBe("en");
 		expect(info.locales).toEqual(["en", "de", "fr"]);
 		expect(info.totalKeys).toBe(6);
+		expect(info.translatableKeys).toBe(6);
 		expect(info.translated.en).toBe(6);
 		expect(info.translated.de).toBe(2);
 		expect(info.translated.fr).toBe(0);
 		expect(info.missing.de).toBe(4);
 		expect(info.missing.fr).toBe(6);
+		expect(info.extraKeys).toEqual({ en: 0, de: 0, fr: 0 });
 		expect(info.pluginKey).toBe("plugin.inlang.messageFormat");
+	});
+
+	it("counts missing only for non-empty base-locale keys", async () => {
+		const mixed = scaffoldProject({
+			baseLocale: "en",
+			locales: ["en", "de"],
+			messages: {
+				en: { filled: "Hello", base_empty: "" },
+				de: {
+					base_empty: "Nicht aus Quelltext",
+					target_only: "Nur im Ziel",
+				},
+			},
+		});
+		try {
+			const local = new TranslationService(mixed.projectPath);
+
+			const before = await local.projectInfo();
+			expect(before.totalKeys).toBe(3);
+			expect(before.translatableKeys).toBe(1);
+			expect(before.translated.en).toBe(1);
+			expect(before.translated.de).toBe(2);
+			expect(before.missing.de).toBe(1);
+			expect(before.extraKeys.de).toBe(2);
+
+			const batch = await local.getTranslationBatch({
+				targetLocale: "de",
+				batchSize: 10,
+			});
+			expect(batch.remaining).toBe(1);
+			expect(batch.items.map((item) => item.key)).toEqual(["filled"]);
+			expect(
+				local.listKeys({ locale: "de", status: "missing" }).keys
+			).toEqual(["filled"]);
+			expect(
+				local.listKeys({ locale: "de", status: "translated" }).keys
+			).toEqual([]);
+
+			await local.saveTranslations({
+				targetLocale: "de",
+				translations: [{ key: "filled", value: "Hallo" }],
+			});
+
+			const after = await local.projectInfo();
+			expect(after.totalKeys).toBe(3);
+			expect(after.translatableKeys).toBe(1);
+			expect(after.missing.de).toBe(0);
+			expect(after.extraKeys.de).toBe(2);
+			expect(
+				local.listKeys({ locale: "de", status: "missing" }).keys
+			).toEqual([]);
+			expect(
+				local.listKeys({ locale: "de", status: "translated" }).keys
+			).toEqual(["filled"]);
+		} finally {
+			removeFixture(mixed.rootDir);
+		}
 	});
 });
 
@@ -596,6 +664,64 @@ describe("saveTranslations", () => {
 		expect(result.results[0]?.error).toContain("unknown message key");
 	});
 
+	it("validates and counts remaining messages against a non-base sourceLocale", async () => {
+		const nonBase = scaffoldProject({
+			baseLocale: "en",
+			locales: ["en", "de", "fr"],
+			messages: {
+				en: {
+					checkout_button_pay: "Pay {amount}",
+					profile_greeting: "Hello {firstName}",
+					base_only: "Base-only {id}",
+				},
+				de: {
+					checkout_button_pay: "Zahle {betrag}",
+					profile_greeting: "Hallo {name}",
+					de_only: "Nur Deutsch {code}",
+				},
+				fr: {},
+			},
+		});
+		try {
+			const local = new TranslationService(nonBase.projectPath);
+			const batch = await local.getTranslationBatch({
+				targetLocale: "fr",
+				sourceLocale: "de",
+				batchSize: 10,
+			});
+			expect(batch.sourceLocale).toBe("de");
+			expect(batch.remaining).toBe(3);
+			expect(batch.items.find((i) => i.key === "checkout_button_pay")?.placeholders).toEqual(["betrag"]);
+
+			const result = await local.saveTranslations({
+				targetLocale: "fr",
+				sourceLocale: "de",
+				translations: [
+					{ key: "checkout_button_pay", value: "Payer {betrag}" },
+					{ key: "profile_greeting", value: "Bonjour {name}" },
+				],
+			});
+			expect(result.saved).toBe(2);
+			expect(result.failed).toBe(0);
+			expect(result.remainingForLocale).toBe(1);
+
+			const frFile = nonBase.readMessages("fr");
+			expect(frFile.checkout_button_pay).toBe("Payer {betrag}");
+			expect(frFile.profile_greeting).toBe("Bonjour {name}");
+			expect(frFile.base_only).toBeUndefined();
+
+			const baseOnly = await local.saveTranslations({
+				targetLocale: "fr",
+				sourceLocale: "de",
+				translations: [{ key: "base_only", value: "Base seulement {id}" }],
+			});
+			expect(baseOnly.failed).toBe(1);
+			expect(baseOnly.results[0]?.error).toContain("unknown message key");
+		} finally {
+			removeFixture(nonBase.rootDir);
+		}
+	});
+
 	it("supports the full iterate-until-done loop", async () => {
 		// translate everything for "de" the way an agent would
 		let guard = 0;
@@ -679,6 +805,144 @@ describe("deleteMessages", () => {
 		expect(() => service.deleteMessages({ keys: [] })).toThrow(
 			/must not be empty/
 		);
+	});
+});
+
+describe("removeOrphanMessages", () => {
+	it("removes target keys that are absent from the base locale", async () => {
+		const orphaned = scaffoldProject({
+			baseLocale: "en",
+			locales: ["en", "de", "fr"],
+			messages: {
+				en: {
+					kept: "Keep me",
+					base_empty: "",
+				},
+				de: {
+					kept: "Behalte mich",
+					base_empty: "Exists in source even though blank",
+					orphan: "Nur Deutsch",
+					checkout_orphan: "Alte Kasse",
+				},
+				fr: {
+					orphan: "Seulement français",
+				},
+			},
+		});
+		try {
+			const local = new TranslationService(orphaned.projectPath);
+			const result = await local.removeOrphanMessages({});
+
+			expect(result).toEqual({
+				sourceLocale: "en",
+				targetLocales: ["de", "fr"],
+				results: [
+					{ locale: "de", deleted: 2, keys: ["checkout_orphan", "orphan"] },
+					{ locale: "fr", deleted: 1, keys: ["orphan"] },
+				],
+				deleted: 3,
+			});
+			expect(orphaned.readMessages("de").kept).toBe("Behalte mich");
+			expect(orphaned.readMessages("de").base_empty).toBe(
+				"Exists in source even though blank"
+			);
+			expect(orphaned.readMessages("de").orphan).toBeUndefined();
+			expect(orphaned.readMessages("fr").orphan).toBeUndefined();
+			expect(orphaned.readMessages("en").kept).toBe("Keep me");
+		} finally {
+			removeFixture(orphaned.rootDir);
+		}
+	});
+
+	it("supports prefix and target locale scoping", async () => {
+		const orphaned = scaffoldProject({
+			baseLocale: "en",
+			locales: ["en", "de", "fr"],
+			messages: {
+				en: { kept: "Keep me" },
+				de: {
+					kept: "Behalte mich",
+					checkout_old: "Alte Kasse",
+					settings_old: "Alte Einstellungen",
+				},
+				fr: {
+					checkout_old: "Ancien paiement",
+				},
+			},
+		});
+		try {
+			const local = new TranslationService(orphaned.projectPath);
+			const result = await local.removeOrphanMessages({
+				targetLocales: ["de"],
+				prefix: "checkout_",
+			});
+
+			expect(result.deleted).toBe(1);
+			expect(result.results).toEqual([
+				{ locale: "de", deleted: 1, keys: ["checkout_old"] },
+			]);
+			expect(orphaned.readMessages("de").checkout_old).toBeUndefined();
+			expect(orphaned.readMessages("de").settings_old).toBe(
+				"Alte Einstellungen"
+			);
+			expect(orphaned.readMessages("fr").checkout_old).toBe(
+				"Ancien paiement"
+			);
+		} finally {
+			removeFixture(orphaned.rootDir);
+		}
+	});
+
+	it("cleans relative to a non-base source locale without deleting source keys", async () => {
+		const orphaned = scaffoldProject({
+			baseLocale: "en",
+			locales: ["en", "de", "fr"],
+			messages: {
+				en: {
+					base_only: "Base only",
+					shared: "Shared",
+				},
+				de: {
+					shared: "Geteilt",
+				},
+				fr: {
+					base_only: "Base seulement",
+					shared: "Partagé",
+					fr_only: "Seulement français",
+				},
+			},
+		});
+		try {
+			const local = new TranslationService(orphaned.projectPath);
+			const result = await local.removeOrphanMessages({
+				sourceLocale: "de",
+				targetLocales: ["fr"],
+			});
+
+			expect(result).toEqual({
+				sourceLocale: "de",
+				targetLocales: ["fr"],
+				results: [
+					{ locale: "fr", deleted: 2, keys: ["base_only", "fr_only"] },
+				],
+				deleted: 2,
+			});
+			expect(orphaned.readMessages("en").base_only).toBe("Base only");
+			expect(orphaned.readMessages("de").shared).toBe("Geteilt");
+			expect(orphaned.readMessages("fr").base_only).toBeUndefined();
+			expect(orphaned.readMessages("fr").shared).toBe("Partagé");
+		} finally {
+			removeFixture(orphaned.rootDir);
+		}
+	});
+
+	it("rejects sourceLocale in targetLocales", async () => {
+		expect(() =>
+			service.removeOrphanMessages({
+				sourceLocale: "en",
+				targetLocales: ["de", "en"],
+			})
+		).toThrow(/must not include sourceLocale/);
 	});
 });
 

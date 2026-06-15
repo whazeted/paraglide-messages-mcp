@@ -30,6 +30,41 @@ const localesAfterChangeSchema = z
 	.array(z.string())
 	.describe("the project's locales after the change");
 
+const readOnlyAnnotations = {
+	readOnlyHint: true,
+	destructiveHint: false,
+	idempotentHint: true,
+	openWorldHint: false,
+} as const;
+
+const saveAnnotations = {
+	readOnlyHint: false,
+	destructiveHint: false,
+	idempotentHint: true,
+	openWorldHint: false,
+} as const;
+
+const nonIdempotentWriteAnnotations = {
+	readOnlyHint: false,
+	destructiveHint: false,
+	idempotentHint: false,
+	openWorldHint: false,
+} as const;
+
+const destructiveWriteAnnotations = {
+	readOnlyHint: false,
+	destructiveHint: true,
+	idempotentHint: false,
+	openWorldHint: false,
+} as const;
+
+const idempotentDestructiveWriteAnnotations = {
+	readOnlyHint: false,
+	destructiveHint: true,
+	idempotentHint: true,
+	openWorldHint: false,
+} as const;
+
 /**
  * Registers the translation tools. They are designed for *per-locale batch*
  * translation: an agent (or one subagent per locale, running in parallel)
@@ -48,14 +83,21 @@ export function registerTools(
 			title: "Project info",
 			description:
 				"Get the inlang/Paraglide project overview: locales, base locale, total message count, " +
-				"and per-locale translated/missing counts. Call this first to plan translation work.",
+				"translation-scope count, and per-locale translated/missing counts. Call this first to plan translation work.",
 			inputSchema: {},
 			outputSchema: {
 				projectPath: z.string(),
 				baseLocale: z.string(),
 				locales: z.array(z.string()),
 				pluginKey: z.string(),
-				totalKeys: z.number().int(),
+				totalKeys: z
+					.number()
+					.int()
+					.describe("all keys present in any locale, including non-source/orphan keys"),
+				translatableKeys: z
+					.number()
+					.int()
+					.describe("non-empty base-locale keys eligible for get_translation_batch"),
 				translationStyle: z
 					.string()
 					.optional()
@@ -65,8 +107,16 @@ export function registerTools(
 					.describe("per locale: keys with a non-empty message"),
 				missing: z
 					.record(z.string(), z.number().int())
-					.describe("per locale: keys missing or empty"),
+					.describe(
+						"per locale: translatable base-locale keys missing or empty in this locale"
+					),
+				extraKeys: z
+					.record(z.string(), z.number().int())
+					.describe(
+						"per locale: non-empty keys ignored by the translate loop because the base value is empty/missing"
+					),
 			},
+			annotations: readOnlyAnnotations,
 		},
 		async () => jsonResult(await service.projectInfo())
 	);
@@ -115,6 +165,7 @@ export function registerTools(
 					.optional()
 					.describe("pass as `after` to fetch the next page"),
 			},
+			annotations: readOnlyAnnotations,
 		},
 		async (args) => jsonResult(await service.listKeys(args))
 	);
@@ -161,6 +212,7 @@ export function registerTools(
 					.boolean()
 					.describe("true when more keys matched than `limit` allowed"),
 			},
+			annotations: readOnlyAnnotations,
 		},
 		async (args) => jsonResult(await service.getMessages(args))
 	);
@@ -214,6 +266,7 @@ export function registerTools(
 					.boolean()
 					.describe("true when more keys matched than `limit` allowed"),
 			},
+			annotations: readOnlyAnnotations,
 		},
 		async (args) => jsonResult(await service.searchMessages(args))
 	);
@@ -273,6 +326,7 @@ export function registerTools(
 					.describe("untranslated messages left for this locale/prefix"),
 				done: z.boolean().describe("true when nothing is left to translate"),
 			},
+			annotations: readOnlyAnnotations,
 		},
 		async (args) => jsonResult(await service.getTranslationBatch(args))
 	);
@@ -351,6 +405,7 @@ export function registerTools(
 					.optional()
 					.describe("pass as `after` in the next call; absent on the last page"),
 			},
+			annotations: readOnlyAnnotations,
 		},
 		async (args) => jsonResult(await service.getRetranslationBatch(args))
 	);
@@ -363,11 +418,19 @@ export function registerTools(
 				"Save translated messages for one target locale and write them to the project's " +
 				"message files. Each value must be a string (simple message) or a single-element " +
 				"variant array (complex message) in the inlang message format. Placeholders are " +
-				"validated against the source message; items with errors are rejected individually " +
+				"validated against the sourceLocale message (default: project base locale); " +
+				"items with errors are rejected individually " +
 				"while valid items are still saved. Returns per-item results plus the number of " +
 				"messages still missing for the locale.",
 			inputSchema: {
 				targetLocale: z.string().describe("locale the translations are for"),
+				sourceLocale: z
+					.string()
+					.optional()
+					.describe(
+						"locale the translations came from (default: project base locale). " +
+							"When saving a batch fetched with sourceLocale, pass the same sourceLocale here."
+					),
 				translations: z
 					.array(
 						z.object({
@@ -411,11 +474,13 @@ export function registerTools(
 					.int()
 					.describe("messages still missing for the target locale"),
 			},
+			annotations: saveAnnotations,
 		},
 		async (args) =>
 			jsonResult(
 				await service.saveTranslations({
 					targetLocale: args.targetLocale,
+					sourceLocale: args.sourceLocale,
 					// zod validates the single-element variant array shape at runtime
 					translations: args.translations as TranslationInput[],
 					allowNewKeys: args.allowNewKeys,
@@ -449,8 +514,56 @@ export function registerTools(
 				deleted: z.number().int(),
 				failed: z.number().int(),
 			},
+			annotations: destructiveWriteAnnotations,
 		},
 		async (args) => jsonResult(await service.deleteMessages(args))
+	);
+
+	server.registerTool(
+		"remove_orphan_messages",
+		{
+			title: "Remove orphan messages",
+			description:
+				"Remove target-locale messages whose keys do not exist in the source locale. " +
+				"An orphan is a key present in a target locale file and absent from sourceLocale " +
+				"(default: project base locale). Empty source values still count as existing. " +
+				"By default this checks every locale except the source locale; narrow with " +
+				"targetLocales and/or prefix when you only want to clean part of the catalog.",
+			inputSchema: {
+				sourceLocale: z
+					.string()
+					.optional()
+					.describe("source locale to compare against (default: project base locale)"),
+				targetLocales: z
+					.array(z.string())
+					.min(1)
+					.optional()
+					.describe(
+						"target locales to clean (default: every project locale except sourceLocale)"
+					),
+				prefix: z
+					.string()
+					.optional()
+					.describe("only remove orphan keys starting with this prefix"),
+			},
+			outputSchema: {
+				sourceLocale: z.string(),
+				targetLocales: z.array(z.string()),
+				results: z.array(
+					z.object({
+						locale: z.string(),
+						deleted: z.number().int(),
+						keys: z.array(z.string()),
+					})
+				),
+				deleted: z
+					.number()
+					.int()
+					.describe("total orphan key occurrences removed across target locales"),
+			},
+			annotations: idempotentDestructiveWriteAnnotations,
+		},
+		async (args) => jsonResult(await service.removeOrphanMessages(args))
 	);
 
 	server.registerTool(
@@ -472,6 +585,7 @@ export function registerTools(
 					.array(z.string())
 					.describe("locales that had a value under the old key"),
 			},
+			annotations: destructiveWriteAnnotations,
 		},
 		async (args) => jsonResult(await service.renameMessage(args))
 	);
@@ -499,6 +613,7 @@ export function registerTools(
 					.boolean()
 					.describe("true when an empty message file was seeded"),
 			},
+			annotations: nonIdempotentWriteAnnotations,
 		},
 		async (args) => jsonResult(await service.addLocale(args))
 	);
@@ -524,6 +639,7 @@ export function registerTools(
 					.describe("non-empty translations that existed in the locale"),
 				messageFileDeleted: z.boolean(),
 			},
+			annotations: destructiveWriteAnnotations,
 		},
 		async (args) => jsonResult(await service.removeLocale(args))
 	);

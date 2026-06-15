@@ -158,8 +158,10 @@ function readLocaleFile(filePath: string): LocaleMessages {
 	let raw: string;
 	try {
 		raw = nodeFs.readFileSync(filePath, "utf8");
-	} catch {
-		return {};
+	} catch (error) {
+		throw new Error(
+			`cannot read message file ${filePath}: ${(error as Error).message}`
+		);
 	}
 	let json: Record<string, unknown>;
 	try {

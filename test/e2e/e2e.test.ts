@@ -53,7 +53,7 @@ async function callTool<T>(name: string, args: Record<string, unknown>): Promise
 }
 
 describe("paraglide-messages-mcp end to end", () => {
-	it("exposes the eleven tools", async () => {
+	it("exposes the twelve tools", async () => {
 		const { tools } = await client.listTools();
 		expect(tools.map((t) => t.name).sort()).toEqual([
 			"add_locale",
@@ -64,6 +64,7 @@ describe("paraglide-messages-mcp end to end", () => {
 			"list_message_keys",
 			"project_info",
 			"remove_locale",
+			"remove_orphan_messages",
 			"rename_message",
 			"save_translations",
 			"search_messages",
@@ -72,6 +73,31 @@ describe("paraglide-messages-mcp end to end", () => {
 			expect(tool.outputSchema, `${tool.name} outputSchema`).toBeDefined();
 			expect(tool.outputSchema?.type).toBe("object");
 		}
+		const byName = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
+		expect(byName.project_info?.annotations).toMatchObject({
+			readOnlyHint: true,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false,
+		});
+		expect(byName.save_translations?.annotations).toMatchObject({
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: true,
+			openWorldHint: false,
+		});
+		expect(byName.delete_messages?.annotations).toMatchObject({
+			readOnlyHint: false,
+			destructiveHint: true,
+			idempotentHint: false,
+			openWorldHint: false,
+		});
+		expect(byName.remove_orphan_messages?.annotations).toMatchObject({
+			readOnlyHint: false,
+			destructiveHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		});
 	});
 
 	it("reports project info", async () => {
@@ -246,7 +272,7 @@ describe("paraglide-messages-mcp end to end", () => {
 	it("renders translate_prefix with the given arguments", async () => {
 		const result = await client.getPrompt({
 			name: "translate_prefix",
-			arguments: { prefix: "checkout_", targetLocale: "fr" },
+			arguments: { prefix: "checkout_", targetLocale: "fr", sourceLocale: "de" },
 		});
 		expect(result.messages).toHaveLength(1);
 		expect(result.messages[0]?.role).toBe("user");
@@ -256,6 +282,7 @@ describe("paraglide-messages-mcp end to end", () => {
 				: "";
 		expect(text).toContain('prefix: "checkout_"');
 		expect(text).toContain('targetLocale: "fr"');
+		expect(text).toContain('sourceLocale: "de"');
 		expect(text).toContain("get_translation_batch");
 		expect(text).toContain("save_translations");
 	});
@@ -465,6 +492,34 @@ describe("paraglide-messages-mcp end to end", () => {
 		expect(
 			(fixture.readMessages("fr") as Record<string, unknown>).greeting
 		).toBe("Bonjour {nom} !");
+	});
+
+	it("removes orphan messages from target locales", async () => {
+		const created = await callTool<{ saved: number; failed: number }>(
+			"save_translations",
+			{
+				targetLocale: "fr",
+				allowNewKeys: true,
+				translations: [{ key: "fr_orphan", value: "Orphelin" }],
+			}
+		);
+		expect(created.saved).toBe(1);
+		expect(created.failed).toBe(0);
+		expect(
+			(fixture.readMessages("fr") as Record<string, unknown>).fr_orphan
+		).toBe("Orphelin");
+
+		const removed = await callTool<{
+			deleted: number;
+			results: Array<{ locale: string; keys: string[] }>;
+		}>("remove_orphan_messages", { targetLocales: ["fr"] });
+		expect(removed.deleted).toBe(1);
+		expect(removed.results).toEqual([
+			{ locale: "fr", deleted: 1, keys: ["fr_orphan"] },
+		]);
+		expect(
+			(fixture.readMessages("fr") as Record<string, unknown>).fr_orphan
+		).toBeUndefined();
 	});
 
 	it("adds a locale, translates into it, and removes it again", async () => {

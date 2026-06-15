@@ -23,7 +23,7 @@ export type SaveSummary = {
  * Validates a save batch against the current snapshot. Pure: returns the
  * per-item results plus the accepted `key -> value` map to persist.
  *
- * The snapshot may be scoped to base + target locale (see ReadOptions), so
+ * The snapshot may be scoped to source + target locale (see ReadOptions), so
  * the unknown-key check covers keys present in either of those — a key that
  * exists only in some third locale needs `allowNewKeys`.
  */
@@ -31,6 +31,7 @@ export function validateBatch(
 	context: ProjectSnapshot,
 	args: {
 		targetLocale: string;
+		sourceLocale?: string;
 		translations: TranslationInput[];
 		allowNewKeys?: boolean;
 		skipValidation?: boolean;
@@ -42,7 +43,16 @@ export function validateBatch(
 	if (!locales.includes(targetLocale)) {
 		throw unknownLocaleError(targetLocale, locales);
 	}
-	const allKeys = args.allowNewKeys ? undefined : collectKeys(snapshot);
+	const sourceLocale = args.sourceLocale ?? baseLocale;
+	if (!locales.includes(sourceLocale)) {
+		throw unknownLocaleError(sourceLocale, locales);
+	}
+	const allKeys = args.allowNewKeys
+		? undefined
+		: collectKeys({
+				[sourceLocale]: snapshot[sourceLocale] ?? {},
+				[targetLocale]: snapshot[targetLocale] ?? {},
+			});
 
 	const results: SaveResultItem[] = [];
 	const accepted: Record<string, MessageValue> = {};
@@ -70,10 +80,10 @@ export function validateBatch(
 			continue;
 		}
 
-		const source = snapshot[baseLocale]?.[item.key];
+		const source = snapshot[sourceLocale]?.[item.key];
 		if (
 			source !== undefined &&
-			targetLocale !== baseLocale &&
+			targetLocale !== sourceLocale &&
 			!args.skipValidation
 		) {
 			const validation = validateTranslation(source, item.value);
@@ -120,13 +130,15 @@ export function validateBatch(
 export function summarizeSave(
 	context: ProjectSnapshot,
 	targetLocale: string,
+	sourceLocale: string | undefined,
 	results: SaveResultItem[],
 	accepted: Record<string, MessageValue>
 ): SaveSummary {
-	const baseMessages = context.snapshot[context.baseLocale] ?? {};
+	const resolvedSourceLocale = sourceLocale ?? context.baseLocale;
+	const sourceMessages = context.snapshot[resolvedSourceLocale] ?? {};
 	const targetMessages = context.snapshot[targetLocale] ?? {};
 	let remainingForLocale = 0;
-	for (const [key, source] of Object.entries(baseMessages)) {
+	for (const [key, source] of Object.entries(sourceMessages)) {
 		if (isEmptyValue(source)) continue;
 		const target = key in accepted ? accepted[key] : targetMessages[key];
 		if (isEmptyValue(target)) remainingForLocale++;
