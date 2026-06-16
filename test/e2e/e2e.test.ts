@@ -309,12 +309,18 @@ describe("paraglide-messages-mcp end to end", () => {
 		expect(result.results[0]?.error).toContain("{nom}");
 	});
 
-	it("rejects unknown locales as tool errors", async () => {
+	it("rejects unknown locales as tool errors that tell the agent not to hand-edit", async () => {
 		const result = await client.callTool({
 			name: "get_translation_batch",
 			arguments: { targetLocale: "xx" },
 		});
 		expect(result.isError).toBe(true);
+		// the write tools append retry/stop guidance to operational errors so an
+		// agent doesn't fall back to editing message files by hand
+		const text = (result.content as Array<{ type: string; text?: string }>)
+			.map((c) => c.text ?? "")
+			.join("");
+		expect(text).toMatch(/do not hand-edit the message files/);
 	});
 
 	it("exposes the five workflow prompts", async () => {

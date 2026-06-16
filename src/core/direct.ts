@@ -257,11 +257,34 @@ function writeLocaleFile(
 		content = sortKeysDeep(content, project.sort) as Record<string, unknown>;
 	}
 
-	nodeFs.mkdirSync(path.dirname(filePath), { recursive: true });
-	nodeFs.writeFileSync(
-		filePath,
-		JSON.stringify({ $schema: MESSAGE_FILE_SCHEMA, ...content }, null, "\t")
+	const serialized = JSON.stringify(
+		{ $schema: MESSAGE_FILE_SCHEMA, ...content },
+		null,
+		"\t"
 	);
+
+	nodeFs.mkdirSync(path.dirname(filePath), { recursive: true });
+	// Atomic write: serialize to a sibling temp file, then rename over the
+	// target. rename is atomic on the same filesystem (POSIX rename(2);
+	// Windows MoveFileEx with REPLACE_EXISTING), so a concurrent or abandoned
+	// agent — or a reader like the Paraglide compiler — never observes a
+	// half-written file. A non-atomic in-place writeFileSync killed mid-flush
+	// would leave truncated JSON that breaks every subsequent read. The temp
+	// name carries the pid so two processes writing the same locale don't
+	// clobber each other's temp file. (Per-locale agents in one process write
+	// distinct files, so they never contend here.)
+	const tempPath = `${filePath}.${process.pid}.tmp`;
+	try {
+		nodeFs.writeFileSync(tempPath, serialized);
+		nodeFs.renameSync(tempPath, filePath);
+	} catch (error) {
+		try {
+			nodeFs.rmSync(tempPath, { force: true });
+		} catch {
+			// best-effort cleanup; surface the original write error
+		}
+		throw error;
+	}
 	// write-through: the next read of this file is a cache hit
 	const stat = nodeFs.statSync(filePath);
 	fileCache.set(filePath, {

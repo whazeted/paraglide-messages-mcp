@@ -8,6 +8,24 @@ import {
 import type { TranslationService } from "../core/service.js";
 import type { TranslationInput } from "../core/types.js";
 
+// One terse factual note appended to the write tools' descriptions, so the
+// contract is visible even to agents that discover tools schema-only (via tool
+// search) and never load the workflow prompts. Kept short on purpose: it sits
+// in always-on context. The *behavioral* half — what to do when a call fails —
+// is emitted only on the error path (see WRITE_FAILURE_GUIDANCE), where it
+// costs nothing until something actually goes wrong.
+const CATALOG_WRITE_CONTRACT =
+	"These message files are written only through the paraglide tools — never hand-edit " +
+	"the locale JSON (it skips validation and can corrupt the file).";
+
+// Appended to thrown (operational) errors from the write tools — unknown
+// locale, unreadable file, transient I/O — i.e. the moment an agent is most
+// tempted to abandon the tools and edit files by hand. Per-item validation
+// failures are NOT errors: they come back in results/saveResults with a fix.
+const WRITE_FAILURE_GUIDANCE =
+	" Retry this call; if it keeps failing, stop and report how many messages remain — " +
+	"do not hand-edit the message files as a fallback.";
+
 const variantSchema = z.object({
 	declarations: z.array(z.string()).optional(),
 	selectors: z.array(z.string()).optional(),
@@ -355,7 +373,8 @@ export function registerTools(
 				"batch), so fix it and re-save (here or via save_translations). " +
 				"Raise batchSize for short UI strings (fewer round-trips); lower it for long, " +
 				"nuanced prose so each item gets full attention. Reads only the source and target locale " +
-				"files, so per-locale agents can run in parallel without touching each other's locales.",
+				"files, so per-locale agents can run in parallel without touching each other's locales. " +
+				CATALOG_WRITE_CONTRACT,
 			inputSchema: {
 				targetLocale: z.string().describe("locale to translate into"),
 				sourceLocale: z
@@ -415,8 +434,8 @@ export function registerTools(
 			annotations: saveAnnotations,
 		},
 		async (args) =>
-			jsonResult(
-				await service.getTranslationBatch({
+			writeResult(() =>
+				service.getTranslationBatch({
 					...args,
 					// zod validates the single-element variant array shape at runtime
 					translations: args.translations as TranslationInput[] | undefined,
@@ -443,7 +462,8 @@ export function registerTools(
 				"without stalling the loop, since the cursor moves regardless. " +
 				"Check `allSaved`/`saveResults` and re-save any failed item (it is past the cursor, so " +
 				"re-save it here or via save_translations). Reads only the source and target locale " +
-				"files, so per-locale agents can run in parallel without touching each other's locales.",
+				"files, so per-locale agents can run in parallel without touching each other's locales. " +
+				CATALOG_WRITE_CONTRACT,
 			inputSchema: {
 				targetLocale: z.string().describe("locale to retranslate"),
 				sourceLocale: z
@@ -519,8 +539,8 @@ export function registerTools(
 			annotations: saveAnnotations,
 		},
 		async (args) =>
-			jsonResult(
-				await service.getRetranslationBatch({
+			writeResult(() =>
+				service.getRetranslationBatch({
 					...args,
 					// zod validates the single-element variant array shape at runtime
 					translations: args.translations as TranslationInput[] | undefined,
@@ -539,7 +559,8 @@ export function registerTools(
 				"validated against the sourceLocale message (default: project base locale); " +
 				"items with errors are rejected individually " +
 				"while valid items are still saved. Returns per-item results plus the number of " +
-				"messages still missing for the locale.",
+				"messages still missing for the locale. " +
+				CATALOG_WRITE_CONTRACT,
 			inputSchema: {
 				targetLocale: z.string().describe("locale the translations are for"),
 				sourceLocale: z
@@ -580,8 +601,8 @@ export function registerTools(
 			annotations: saveAnnotations,
 		},
 		async (args) =>
-			jsonResult(
-				await service.saveTranslations({
+			writeResult(() =>
+				service.saveTranslations({
 					targetLocale: args.targetLocale,
 					sourceLocale: args.sourceLocale,
 					// zod validates the single-element variant array shape at runtime
@@ -763,4 +784,23 @@ function jsonResult(data: Record<string, unknown>) {
 		],
 		structuredContent: data,
 	};
+}
+
+/**
+ * Runs a write tool, and on a thrown (operational) error returns an error
+ * result whose message carries WRITE_FAILURE_GUIDANCE — so the "retry, else
+ * stop; never hand-edit" instruction reaches the agent exactly when a call
+ * fails, instead of riding along in every tool description. Per-item
+ * validation failures don't throw, so they keep their normal saveResults path.
+ */
+async function writeResult(run: () => Record<string, unknown> | Promise<Record<string, unknown>>) {
+	try {
+		return jsonResult(await run());
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		return {
+			content: [{ type: "text" as const, text: message + WRITE_FAILURE_GUIDANCE }],
+			isError: true as const,
+		};
+	}
 }

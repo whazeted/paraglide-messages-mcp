@@ -181,6 +181,26 @@ describe("direct writes", () => {
 		expect(() => service.projectInfo()).toThrow(/cannot read message file/);
 	});
 
+	it("writes atomically, leaving no temp file and never a partial file", async () => {
+		const f = fixture();
+		const service = new TranslationService(f.projectPath);
+		await service.saveTranslations({
+			targetLocale: "fr",
+			translations: [{ key: "greeting", value: "Bonjour {name}!" }],
+		});
+
+		// the rename target is valid JSON (never a truncated in-place write)
+		const raw = fs.readFileSync(path.join(f.messagesDir, "fr.json"), "utf8");
+		expect(() => JSON.parse(raw)).not.toThrow();
+		expect(f.readMessages("fr").greeting).toBe("Bonjour {name}!");
+
+		// no leftover *.tmp sidecar files in the messages dir
+		const leftovers = fs
+			.readdirSync(f.messagesDir)
+			.filter((name) => name.includes(".tmp"));
+		expect(leftovers).toEqual([]);
+	});
+
 	it("respects the plugin's sort setting", async () => {
 		const f = fixture();
 		patchSettings(f, (s) => {
