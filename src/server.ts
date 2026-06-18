@@ -4,7 +4,7 @@ import { registerTools } from "./primitives/tools.js";
 import { registerPrompts } from "./primitives/prompts.js";
 import { registerResources } from "./primitives/resources.js";
 
-export const SERVER_VERSION = "0.2.2";
+export const SERVER_VERSION = "0.3.0";
 
 export interface ServerOptions {
 	/**
