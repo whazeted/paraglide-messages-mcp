@@ -1,22 +1,20 @@
 ---
 name: paraglide-translation
-description: Use when the user wants to manage Paraglide JS / inlang messages or translations: translate missing or existing messages, add or remove locales, inspect/search message keys, rename/delete messages, remove orphan messages, or review i18n state.
+description: Translate or inspect Paraglide JS / inlang message-format projects using durable OpenAI Batch jobs through the paraglide MCP server.
 ---
 
-# Paraglide messages
+# Paraglide translations
 
-Use the `paraglide` MCP server for Paraglide JS / inlang message and translation work.
+Use the `paraglide` MCP server to inspect and translate messages.
 
-- Prefer the server's prompts when the user asks for translation, multi-locale translation, retranslation, review, or cleanup workflows.
-- Use the server's tools and resources to inspect, validate, and write message changes.
-- Do not edit `messages/*.json` or `project.inlang/` files directly when the MCP server is available; let the server validate and persist changes.
-- If the server is not available, tell the user that this skill expects the `paraglide` MCP server and ask them to connect it.
+1. Read `project_info` to determine the source locale, targets and missing counts.
+2. Submit `start_translation_job` with a stable caller-generated `jobId`, selected `targetLocales`, optional `prefix` and `translationStyle`. Omitted targets mean all non-source locales. Use `mode: all` to refresh existing copy. OpenAI performs paid asynchronous translation; no translating subagents are needed.
+3. Keep the job ID. Reuse it on retries; different options require a new ID. A tool call returns promptly and the remote job can take up to 24 hours.
+4. Call `get_translation_job` periodically to reconcile and collect. After a disconnect/restart, find jobs with `list_translation_jobs`. Completion requires no `lastError`, acceptable `failed` counts and `cleanedUp: true`; remote status alone is insufficient.
+5. Inspect item failures and conflicts. Fix selected existing messages with `save_translations` or submit new scoped work. Preserve flat keys, placeholders and variants. Do not overwrite concurrent user edits or bypass validation by hand-editing locale files.
 
-## Fanning out one subagent per locale
+Use `cancel_translation_job` to stop outstanding work, then keep collecting until terminal and cleaned up; cancellation can take ten minutes and successful partial results are retained. An uncertain create response stays pending for reconciliation: never submit a replacement paid batch merely because a tool call failed.
 
-Translating many locales in parallel is the server's intended use, but spawn the subagents carefully — a botched fan-out wastes far more than it saves.
+For unattended collection, the user can schedule `paraglide-messages-mcp --project <path> --resume`; it makes one reconciliation pass and exits. Do not create a schedule unless the user requests one.
 
-- **Restrict each subagent's tools to ToolSearch + the `paraglide` tools.** With no `Bash`/`Write`/`Edit` available, a subagent that hits a problem can only retry or stop — it cannot silently fall back to hand-editing message files (which skips validation and corrupts them).
-- **Make each subagent confirm its tools loaded before translating.** A freshly spawned subagent may race the MCP server's registration: an exact-name `select:` ToolSearch can return empty if it fires before the server is registered in that subagent's context. Instruct the subagent: if ToolSearch returns nothing, retry it (or use a keyword query, which waits for connecting servers); if the `paraglide` tools still don't resolve, STOP and report — never improvise with shell or file edits.
-- **Verify with `project_info`, don't trust subagent self-reports.** A subagent can report success while having saved nothing. After the fan-out, call `project_info` and re-dispatch a subagent for any locale whose `missing` count is non-zero. Loop until every locale is actually at zero.
-- Prefer the `translate_project` prompt, which already encodes this fan-out-and-verify loop.
+If the server is unavailable, explain that this skill requires the `paraglide` MCP connection. The server defaults to `gpt-6-luna` with low reasoning; the API key and optional model override belong in server configuration.

@@ -1,25 +1,15 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
 import { TranslationService } from "./core/service.js";
+import { BatchTranslationService, type BatchOptions } from "./core/batch.js";
 import { registerTools } from "./primitives/tools.js";
-import { registerPrompts } from "./primitives/prompts.js";
-import { registerResources } from "./primitives/resources.js";
 
 export const SERVER_VERSION = "0.3.0";
 
-export interface ServerOptions {
-	/**
-	 * Linguistic style brief supplied by the MCP client at server startup.
-	 * Prompts and project_info expose it so agents do not infer style from
-	 * existing translations.
-	 */
-	translationStyle?: string;
-}
+export type ServerOptions = BatchOptions;
 
 /**
  * Creates the MCP server for the inlang project at `projectPath`. The MCP
- * surface (tools, prompts, resources) lives in primitives/, the translation
- * domain logic in core/; all primitives operate on the same
- * TranslationService.
+ * tools live in primitives/; file validation and durable jobs live in core/.
  */
 export function createServer(
 	projectPath: string,
@@ -34,11 +24,12 @@ export function createServer(
 		version: SERVER_VERSION,
 	});
 
-	registerTools(server, service);
-	registerPrompts(server, service, {
-		translationStyle: service.translationStyle,
-	});
-	registerResources(server, service);
+	registerTools(server, service, new BatchTranslationService(projectPath, options));
 
 	return server;
+}
+
+/** Web-standard HTTP entry: a fresh server per request, no protocol session. */
+export function createHandler(projectPath: string, options: ServerOptions = {}) {
+	return createMcpHandler(() => createServer(projectPath, options), { responseMode: "json" });
 }

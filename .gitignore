@@ -3,3 +3,6 @@ dist/
 .npmrc
 *.log
 .DS_Store
+.paraglide-batches/
+.paraglide-catalog.lock*
+.paraglide-live-test/

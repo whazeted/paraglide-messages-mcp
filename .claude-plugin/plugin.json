@@ -1,6 +1,6 @@
 {
 	"name": "paraglide-translation",
-	"description": "Translate Paraglide JS / inlang message files via the paraglide-messages-mcp server — validated saves, one parallel agent per locale.",
+	"description": "Translate Paraglide JS / inlang messages through durable OpenAI Batch jobs with validated saves and stateless MCP.",
 	"version": "0.3.0",
 	"author": {
 		"name": "Wessel Haze",

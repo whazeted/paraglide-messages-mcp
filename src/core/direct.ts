@@ -1,6 +1,7 @@
 import nodeFs from "node:fs";
 import path from "node:path";
 import { flatten, unflatten } from "flat";
+import { atomicWrite } from "./durable.js";
 import type { LocaleMessages, MessagesSnapshot } from "./types.js";
 
 /**
@@ -50,6 +51,8 @@ export interface DirectProject {
  */
 interface CacheEntry {
 	mtimeMs: number;
+	ctimeMs: number;
+	ino: number;
 	size: number;
 	messages: LocaleMessages;
 }
@@ -154,13 +157,14 @@ function readLocaleFile(filePath: string): LocaleMessages {
 	let stat: nodeFs.Stats;
 	try {
 		stat = nodeFs.statSync(filePath);
-	} catch {
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 		// missing file counts as empty (a locale freshly added to settings)
 		fileCache.delete(filePath);
 		return {};
 	}
 	const cached = fileCache.get(filePath);
-	if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+	if (cached && cached.mtimeMs === stat.mtimeMs && cached.ctimeMs === stat.ctimeMs && cached.ino === stat.ino && cached.size === stat.size) {
 		return cached.messages;
 	}
 
@@ -187,6 +191,8 @@ function readLocaleFile(filePath: string): LocaleMessages {
 	// stored mtime is older than the content and the next read re-parses
 	fileCache.set(filePath, {
 		mtimeMs: stat.mtimeMs,
+		ctimeMs: stat.ctimeMs,
+		ino: stat.ino,
 		size: stat.size,
 		messages,
 	});
@@ -263,32 +269,13 @@ function writeLocaleFile(
 		"\t"
 	);
 
-	nodeFs.mkdirSync(path.dirname(filePath), { recursive: true });
-	// Atomic write: serialize to a sibling temp file, then rename over the
-	// target. rename is atomic on the same filesystem (POSIX rename(2);
-	// Windows MoveFileEx with REPLACE_EXISTING), so a concurrent or abandoned
-	// agent — or a reader like the Paraglide compiler — never observes a
-	// half-written file. A non-atomic in-place writeFileSync killed mid-flush
-	// would leave truncated JSON that breaks every subsequent read. The temp
-	// name carries the pid so two processes writing the same locale don't
-	// clobber each other's temp file. (Per-locale agents in one process write
-	// distinct files, so they never contend here.)
-	const tempPath = `${filePath}.${process.pid}.tmp`;
-	try {
-		nodeFs.writeFileSync(tempPath, serialized);
-		nodeFs.renameSync(tempPath, filePath);
-	} catch (error) {
-		try {
-			nodeFs.rmSync(tempPath, { force: true });
-		} catch {
-			// best-effort cleanup; surface the original write error
-		}
-		throw error;
-	}
+	atomicWrite(filePath, serialized);
 	// write-through: the next read of this file is a cache hit
 	const stat = nodeFs.statSync(filePath);
 	fileCache.set(filePath, {
 		mtimeMs: stat.mtimeMs,
+		ctimeMs: stat.ctimeMs,
+		ino: stat.ino,
 		size: stat.size,
 		messages,
 	});

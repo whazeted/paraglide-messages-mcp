@@ -1,6 +1,6 @@
 {
 	"name": "paraglide-mcp",
-	"description": "MCP server and skill for translating Paraglide JS / inlang message files — validated saves, one parallel agent per locale.",
+	"description": "Stateless MCP server and skill for translating Paraglide JS / inlang messages through durable OpenAI Batch jobs.",
 	"owner": {
 		"name": "Wessel Haze",
 		"url": "https://github.com/WesHaze"
@@ -9,7 +9,7 @@
 		{
 			"name": "paraglide-translation",
 			"source": "./",
-			"description": "Translate Paraglide JS / inlang message files: bundles the paraglide-messages-mcp server (validated, parallel per-locale translation tools) and a skill teaching the workflow."
+			"description": "Translate Paraglide JS / inlang messages: bundles a durable OpenAI Batch translation server and its workflow skill."
 		}
 	]
 }

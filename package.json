@@ -1,7 +1,7 @@
 {
 	"name": "paraglide-messages-mcp",
 	"version": "0.3.0",
-	"description": "MCP server for translating Paraglide JS / inlang projects in validated per-locale batches — built for one agent per locale in parallel",
+	"description": "Stateless MCP service for durable OpenAI Batch translations of Paraglide / inlang messages",
 	"license": "MIT",
 	"mcpName": "io.github.whazeted/paraglide-messages-mcp",
 	"repository": {
@@ -15,7 +15,7 @@
 	"packageManager": "pnpm@10.33.2",
 	"type": "module",
 	"engines": {
-		"node": ">=20.0.0"
+		"node": ">=22.12.0"
 	},
 	"bin": {
 		"paraglide-messages-mcp": "dist/cli.js"
@@ -28,7 +28,9 @@
 	"files": [
 		"dist",
 		"skill",
-		"README.md"
+		"README.md",
+		"COMPATIBILITY.md",
+		"DEVELOPMENT.md"
 	],
 	"keywords": [
 		"mcp",
@@ -39,7 +41,7 @@
 		"translation"
 	],
 	"scripts": {
-		"build": "tsc -p tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
+		"build": "node scripts/clean.mjs && tsc -p tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run --exclude 'test/e2e/**' --exclude 'test/benchmark/**'",
 		"test:e2e": "pnpm build && vitest run test/e2e/e2e.test.ts",
@@ -49,13 +51,15 @@
 		"prepublishOnly": "pnpm build"
 	},
 	"dependencies": {
-		"@modelcontextprotocol/sdk": "^1.29.0",
+		"@modelcontextprotocol/server": "^2.3.1",
 		"flat": "^6.0.1",
-		"zod": "^3.25.0"
+		"openai": "^7.30.0",
+		"zod": "^4.6.5"
 	},
 	"devDependencies": {
-		"@types/node": "^22.0.0",
-		"typescript": "^5.7.0",
-		"vitest": "^3.2.0"
+		"@modelcontextprotocol/client": "^2.3.1",
+		"@types/node": "^24.19.1",
+		"typescript": "^7.0.2",
+		"vitest": "^5.0.3"
 	}
 }

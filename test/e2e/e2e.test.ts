@@ -1,637 +1,107 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { spawn } from "node:child_process";
+import { createServer as createHttpServer } from "node:http";
+import { BatchTranslationService } from "../../src/core/batch.js";
+import { FakeOpenAI } from "../shared/openai.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { Client, PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { createFixtureProject, removeFixture } from "../shared/helpers.js";
 
-/**
- * End-to-end: spawns the built CLI (dist/cli.js) exactly like an MCP client
- * launched via `npx paraglide-messages-mcp` would, talks MCP over stdio, and verifies
- * the translations land in messages/de.json on disk.
- *
- * Requires `pnpm build` first (use `pnpm test:e2e` / `pnpm test:all`).
- */
-const cliPath = path.resolve(
-	path.dirname(fileURLToPath(import.meta.url)),
-	"../../dist/cli.js"
-);
+const cliPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../dist/cli.js");
+const fixtures: ReturnType<typeof createFixtureProject>[] = [];
+const clients: Client[] = [];
 
-let fixture: ReturnType<typeof createFixtureProject>;
-let client: Client;
-
-beforeAll(async () => {
-	fixture = createFixtureProject();
-	client = new Client({ name: "e2e-test", version: "0.0.0" });
-	await client.connect(
-		new StdioClientTransport({
-			command: process.execPath,
-			args: [cliPath, "--project", fixture.projectPath],
-			stderr: "pipe",
-		})
-	);
+afterEach(async () => {
+	await Promise.all(clients.splice(0).map(client => client.close()));
+	for (const fixture of fixtures.splice(0)) removeFixture(fixture.rootDir);
 });
 
-afterAll(async () => {
-	await client.close();
-	removeFixture(fixture.rootDir);
-});
-
-async function readJsonResource<T>(uri: string): Promise<T> {
-	const result = await client.readResource({ uri });
-	const first = result.contents[0];
-	expect(first?.mimeType).toBe("application/json");
-	if (!first || !("text" in first)) throw new Error("expected text contents");
-	return JSON.parse(first.text as string) as T;
+async function connect() {
+	const fixture = createFixtureProject(); fixtures.push(fixture);
+	const client = new Client({ name: "e2e", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } }); clients.push(client);
+	await client.connect(new StdioClientTransport({ command: process.execPath,
+		args: [cliPath, "--project", fixture.projectPath, "--translation-style", "Concise UI"], stderr: "pipe" }));
+	return { fixture, client };
 }
 
-async function callTool<T>(name: string, args: Record<string, unknown>): Promise<T> {
-	const result = await client.callTool({ name, arguments: args });
-	expect(result.isError ?? false).toBe(false);
-	expect(result.structuredContent).toBeDefined();
-	return result.structuredContent as T;
-}
+describe("stdio MCP v2", () => {
+	it("collects a persisted job through the one-pass CLI worker", async () => {
+		const fixture = createFixtureProject(); fixtures.push(fixture);
+		const fake = new FakeOpenAI();
+		await new BatchTranslationService(fixture.projectPath, { openai: fake.client }).start({ jobId: "worker-fr", targetLocales: ["fr"] });
+		fake.finish();
+		const server = createHttpServer(async (req, res) => {
+			try {
+				const response = await fake.fetch(new URL(req.url!, "http://local.test"), { method: req.method });
+				res.writeHead(response.status, Object.fromEntries(response.headers));
+				res.end(await response.text());
+			} catch (error) { res.writeHead(500); res.end(String(error)); }
+		});
+		await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+		try {
+			const address = server.address() as { port: number };
+			const child = spawn(process.execPath, [cliPath, "--project", fixture.projectPath, "--resume"], {
+				env: { ...process.env, OPENAI_API_KEY: "test-key", OPENAI_BASE_URL: `http://127.0.0.1:${address.port}/v1` },
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+			let output = "", errors = "";
+			child.stdout.on("data", data => { output += data; });
+			child.stderr.on("data", data => { errors += data; });
+			const code = await new Promise<number | null>((resolve, reject) => { child.once("exit", resolve); child.once("error", reject); });
+			expect(errors).toBe(""); expect(code).toBe(0);
+			expect(JSON.parse(output.trim())).toMatchObject({ jobId: "worker-fr", saved: 6, failed: 0, cleanedUp: true });
+			expect(fixture.readMessages("fr").greeting).toBe("FR:Hello {name}!");
+		} finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
+	});
 
-describe("paraglide-messages-mcp end to end", () => {
-	it("exposes the twelve tools", async () => {
+	it("serves the smaller tool surface and validates writes on disk", async () => {
+		const { fixture, client } = await connect();
+		expect(client.getProtocolEra()).toBe("modern");
 		const { tools } = await client.listTools();
-		expect(tools.map((t) => t.name).sort()).toEqual([
-			"add_locale",
-			"delete_messages",
-			"get_messages",
-			"get_retranslation_batch",
-			"get_translation_batch",
-			"list_message_keys",
-			"project_info",
-			"remove_locale",
-			"remove_orphan_messages",
-			"rename_message",
-			"save_translations",
-			"search_messages",
+		expect(tools.map(t => t.name).sort()).toEqual([
+			"cancel_translation_job", "get_messages", "get_translation_job", "list_message_keys",
+			"list_translation_jobs", "project_info", "save_translations", "search_messages", "start_translation_job",
 		]);
-		for (const tool of tools) {
-			expect(tool.outputSchema, `${tool.name} outputSchema`).toBeDefined();
-			expect(tool.outputSchema?.type).toBe("object");
-		}
-		const byName = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
-		expect(byName.project_info?.annotations).toMatchObject({
-			readOnlyHint: true,
-			destructiveHint: false,
-			idempotentHint: true,
-			openWorldHint: false,
-		});
-		expect(byName.save_translations?.annotations).toMatchObject({
-			readOnlyHint: false,
-			destructiveHint: false,
-			idempotentHint: true,
-			openWorldHint: false,
-		});
-		expect(byName.delete_messages?.annotations).toMatchObject({
-			readOnlyHint: false,
-			destructiveHint: true,
-			idempotentHint: false,
-			openWorldHint: false,
-		});
-		expect(byName.remove_orphan_messages?.annotations).toMatchObject({
-			readOnlyHint: false,
-			destructiveHint: true,
-			idempotentHint: true,
-			openWorldHint: false,
-		});
+		const info = await client.callTool({ name: "project_info", arguments: {} });
+		expect(info.structuredContent).toMatchObject({ baseLocale: "en", translationStyle: "Concise UI" });
+		const invalid = await client.callTool({ name: "save_translations", arguments: {
+			targetLocale: "fr", translations: [{ key: "greeting", value: "Bonjour {nom}" }],
+		} });
+		expect(invalid.structuredContent).toMatchObject({ saved: 0, failed: 1 });
+		const saved = await client.callTool({ name: "save_translations", arguments: {
+			targetLocale: "fr", translations: [{ key: "greeting", value: "Bonjour {name}" }],
+		} });
+		expect(saved.structuredContent).toMatchObject({ saved: 1, failed: 0 });
+		expect(fixture.readMessages("fr").greeting).toBe("Bonjour {name}");
+		const jobs = await client.callTool({ name: "list_translation_jobs", arguments: {} });
+		expect(jobs.structuredContent).toEqual({ jobs: [], hasMore: false });
 	});
 
-	it("reports project info", async () => {
-		const info = await callTool<{
-			baseLocale: string;
-			locales: string[];
-			missing: Record<string, number>;
-		}>("project_info", {});
-		expect(info.baseLocale).toBe("en");
-		expect(info.locales).toEqual(["en", "de", "fr"]);
-		expect(info.missing.de).toBe(4);
-	});
-
-	it("lists keys with a prefix filter", async () => {
-		const result = await callTool<{ keys: string[] }>("list_message_keys", {
-			prefix: "checkout_",
-		});
-		expect(result.keys).toEqual([
-			"checkout_button_cancel",
-			"checkout_button_pay",
-			"checkout_title",
-		]);
-	});
-
-	it("retrieves messages for specific locales", async () => {
-		const result = await callTool<{
-			messages: Array<{ key: string; translations: Record<string, unknown> }>;
-		}>("get_messages", { keys: ["greeting"], locales: ["en", "de"] });
-		expect(result.messages[0]?.translations).toEqual({
-			en: "Hello {name}!",
-			de: "Hallo {name}!",
-		});
-	});
-
-	it("translates a full locale via batch iterations and writes to disk", async () => {
-		let iterations = 0;
-		for (;;) {
-			const batch = await callTool<{
-				done: boolean;
-				items: Array<{ key: string; source: unknown }>;
-			}>("get_translation_batch", { targetLocale: "de", batchSize: 2 });
-			if (batch.done) break;
-			if (++iterations > 10) throw new Error("loop did not converge");
-
-			const save = await callTool<{ failed: number; saved: number }>(
-				"save_translations",
-				{
-					targetLocale: "de",
-					translations: batch.items.map((item) => ({
-						key: item.key,
-						value:
-							typeof item.source === "string"
-								? `DE:${item.source}`
-								: item.source,
-					})),
-				}
-			);
-			expect(save.failed).toBe(0);
-		}
-
-		expect(iterations).toBeGreaterThan(1);
-
-		const deFile = fixture.readMessages("de") as Record<string, unknown>;
-		expect(deFile.checkout_title).toBe("DE:Checkout");
-		const inbox = deFile.inbox_count as Array<{ match: Record<string, string> }>;
-		expect(inbox[0]?.match["countPlural=other"]).toBe(
-			"You have {count} messages"
-		);
-
-		const info = await callTool<{ missing: Record<string, number> }>(
-			"project_info",
-			{}
-		);
-		expect(info.missing.de).toBe(0);
-	});
-
-	it("fused loop: autosaves the previous batch and reports allSaved over the wire", async () => {
-		// own fixture/client so the shared sequential state above is untouched
-		const local = createFixtureProject();
-		const localClient = new Client({ name: "fused-e2e-test", version: "0.0.0" });
-		await localClient.connect(
-			new StdioClientTransport({
-				command: process.execPath,
-				args: [cliPath, "--project", local.projectPath],
-				stderr: "pipe",
-			})
-		);
+	it.each(["server/discover", "initialize"])("accepts %s openings on the real CLI", async method => {
+		const fixture = createFixtureProject(); fixtures.push(fixture);
+		const child = spawn(process.execPath, [cliPath, "--project", fixture.projectPath], { stdio: ["pipe", "pipe", "pipe"] });
 		try {
-			const call = async <T>(
-				name: string,
-				args: Record<string, unknown>
-			): Promise<T> => {
-				// the SDK validates structuredContent against the tool's
-				// outputSchema, so a populated autosave response is checked here
-				const r = await localClient.callTool({ name, arguments: args });
-				expect(r.isError ?? false).toBe(false);
-				return r.structuredContent as T;
-			};
-
-			type Batch = {
-				done: boolean;
-				items: Array<{ key: string; source: unknown }>;
-				saved?: number;
-				allSaved?: boolean;
-			};
-
-			let batch = await call<Batch>("get_translation_batch", {
-				targetLocale: "de",
-				batchSize: 2,
+			const reply = new Promise<string>((resolve, reject) => {
+				let text = "";
+				child.stdout.on("data", data => { text += data; if (text.includes("\n")) resolve(text.split("\n")[0]!); });
+				child.on("error", reject);
+				child.on("exit", code => reject(new Error(`server exited: ${code}`)));
 			});
-			// priming call performed no save
-			expect(batch.saved).toBeUndefined();
-			expect(batch.allSaved).toBeUndefined();
-
-			let guard = 0;
-			while (!batch.done) {
-				if (++guard > 10) throw new Error("loop did not converge");
-				batch = await call<Batch>("get_translation_batch", {
-					targetLocale: "de",
-					batchSize: 2,
-					translations: batch.items.map((item) => ({
-						key: item.key,
-						value:
-							typeof item.source === "string"
-								? `DE:${item.source}`
-								: item.source,
-					})),
-				});
-				expect(batch.allSaved).toBe(true);
-			}
-
-			const deFile = local.readMessages("de") as Record<string, unknown>;
-			expect(deFile.checkout_title).toBe("DE:Checkout");
-			const info = await call<{ missing: Record<string, number> }>(
-				"project_info",
-				{}
-			);
-			expect(info.missing.de).toBe(0);
+			child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method,
+				params: method === "initialize" ? { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "legacy", version: "1" } } : {
+					_meta: { [PROTOCOL_VERSION_META_KEY]: "2026-07-28", [CLIENT_INFO_META_KEY]: { name: "modern", version: "1" }, [CLIENT_CAPABILITIES_META_KEY]: {} },
+				},
+			}) + "\n");
+			const response = JSON.parse(await reply);
+			expect(response.error).toBeUndefined();
+			if (method === "initialize") expect(response.result.protocolVersion).toBe("2025-11-25");
+			else expect(JSON.stringify(response.result)).toContain("2026-07-28");
 		} finally {
-			await localClient.close();
-			removeFixture(local.rootDir);
+			const closed = new Promise(resolve => child.once("exit", resolve));
+			child.stdin.end();
+			await closed;
 		}
-	});
-
-	it("retranslates an already-translated prefix via cursor pages", async () => {
-		// the previous test filled "de" completely; redo the checkout_ keys
-		let after: string | undefined;
-		let pages = 0;
-		const seen: string[] = [];
-		for (;;) {
-			const batch = await callTool<{
-				items: Array<{ key: string; source: unknown; existingTarget?: unknown }>;
-				total: number;
-				hasMore: boolean;
-				nextCursor?: string;
-			}>("get_retranslation_batch", {
-				targetLocale: "de",
-				prefix: "checkout_",
-				batchSize: 2,
-				...(after !== undefined && { after }),
-			});
-			if (++pages > 10) throw new Error("loop did not converge");
-			expect(batch.total).toBe(3);
-			for (const item of batch.items) {
-				// everything in scope is already translated, so the current
-				// value is exposed for the agent to judge
-				expect(item.existingTarget).toBeDefined();
-				seen.push(item.key);
-			}
-
-			const save = await callTool<{ failed: number }>("save_translations", {
-				targetLocale: "de",
-				translations: batch.items.map((item) => ({
-					key: item.key,
-					value:
-						typeof item.source === "string"
-							? `DE2:${item.source}`
-							: item.source,
-				})),
-			});
-			expect(save.failed).toBe(0);
-
-			if (!batch.hasMore) break;
-			after = batch.nextCursor;
-		}
-
-		expect(pages).toBe(2);
-		expect(seen).toEqual([
-			"checkout_button_cancel",
-			"checkout_button_pay",
-			"checkout_title",
-		]);
-
-		const deFile = fixture.readMessages("de") as Record<string, unknown>;
-		expect(deFile.checkout_title).toBe("DE2:Checkout");
-		// keys outside the prefix were not touched
-		expect(deFile.greeting).toBe("Hallo {name}!");
-	});
-
-	it("surfaces validation errors through the tool result", async () => {
-		const result = await callTool<{
-			failed: number;
-			results: Array<{ status: string; error?: string }>;
-		}>("save_translations", {
-			targetLocale: "fr",
-			translations: [{ key: "greeting", value: "Bonjour {nom} !" }],
-		});
-		expect(result.failed).toBe(1);
-		expect(result.results[0]?.error).toContain("{nom}");
-	});
-
-	it("rejects unknown locales as tool errors that tell the agent not to hand-edit", async () => {
-		const result = await client.callTool({
-			name: "get_translation_batch",
-			arguments: { targetLocale: "xx" },
-		});
-		expect(result.isError).toBe(true);
-		// the write tools append retry/stop guidance to operational errors so an
-		// agent doesn't fall back to editing message files by hand
-		const text = (result.content as Array<{ type: string; text?: string }>)
-			.map((c) => c.text ?? "")
-			.join("");
-		expect(text).toMatch(/do not hand-edit the message files/);
-	});
-
-	it("exposes the five workflow prompts", async () => {
-		const { prompts } = await client.listPrompts();
-		expect(prompts.map((p) => p.name).sort()).toEqual([
-			"retranslate",
-			"review_locale",
-			"translate_locale",
-			"translate_prefix",
-			"translate_project",
-		]);
-		const translatePrefix = prompts.find((p) => p.name === "translate_prefix");
-		expect(
-			translatePrefix?.arguments?.find((a) => a.name === "targetLocale")
-				?.required
-		).toBe(true);
-		expect(
-			translatePrefix?.arguments?.find((a) => a.name === "sourceLocale")
-				?.required
-		).toBeFalsy();
-	});
-
-	it("renders translate_prefix with the given arguments", async () => {
-		const result = await client.getPrompt({
-			name: "translate_prefix",
-			arguments: { prefix: "checkout_", targetLocale: "fr", sourceLocale: "de" },
-		});
-		expect(result.messages).toHaveLength(1);
-		expect(result.messages[0]?.role).toBe("user");
-		const text =
-			result.messages[0]?.content.type === "text"
-				? result.messages[0].content.text
-				: "";
-		expect(text).toContain('prefix: "checkout_"');
-		expect(text).toContain('targetLocale: "fr"');
-		expect(text).toContain('sourceLocale: "de"');
-		expect(text).toContain("get_translation_batch");
-		expect(text).toContain("save_translations");
-	});
-
-	it("surfaces the startup translation style in project_info and prompts", async () => {
-		const translationStyle =
-			"Concise product UI; informal address; keep brand terms untranslated.";
-		const styledClient = new Client({ name: "styled-e2e-test", version: "0.0.0" });
-		await styledClient.connect(
-			new StdioClientTransport({
-				command: process.execPath,
-				args: [
-					cliPath,
-					"--project",
-					fixture.projectPath,
-					"--translation-style",
-					translationStyle,
-				],
-				stderr: "pipe",
-			})
-		);
-
-		try {
-			const infoResult = await styledClient.callTool({
-				name: "project_info",
-				arguments: {},
-			});
-			expect(infoResult.structuredContent).toMatchObject({
-				translationStyle,
-			});
-
-			const prompt = await styledClient.getPrompt({
-				name: "translate_project",
-				arguments: { locales: "fr" },
-			});
-			const text =
-				prompt.messages[0]?.content.type === "text"
-					? prompt.messages[0].content.text
-					: "";
-			expect(text).toContain("server startup translation style brief");
-			expect(text).toContain(translationStyle);
-			expect(text).not.toContain("Sample representative messages");
-		} finally {
-			await styledClient.close();
-		}
-	});
-
-	it("lists the static and per-locale resources", async () => {
-		const { resources } = await client.listResources();
-		const uris = resources.map((r) => r.uri);
-		expect(uris).toContain("paraglide://project/info");
-		// one missing-keys resource per project locale, from the template's list callback
-		expect(uris).toContain("paraglide://locales/en/missing");
-		expect(uris).toContain("paraglide://locales/de/missing");
-		expect(uris).toContain("paraglide://locales/fr/missing");
-	});
-
-	it("lists the resource templates", async () => {
-		const { resourceTemplates } = await client.listResourceTemplates();
-		expect(resourceTemplates.map((t) => t.uriTemplate).sort()).toEqual([
-			"paraglide://locales/{locale}/missing",
-			"paraglide://messages/{locale}/{key}",
-		]);
-	});
-
-	it("reads project info as a resource", async () => {
-		const info = await readJsonResource<{
-			baseLocale: string;
-			locales: string[];
-		}>("paraglide://project/info");
-		expect(info.baseLocale).toBe("en");
-		expect(info.locales).toEqual(["en", "de", "fr"]);
-	});
-
-	it("reads the missing keys for a locale", async () => {
-		// fr is still fully untranslated (the earlier fr save was rejected)
-		const fr = await readJsonResource<{
-			locale: string;
-			missing: number;
-			keys: string[];
-		}>("paraglide://locales/fr/missing");
-		expect(fr.locale).toBe("fr");
-		expect(fr.missing).toBe(6);
-		expect(fr.keys).toContain("greeting");
-
-		// de was fully translated by the batch-loop test above
-		const de = await readJsonResource<{ missing: number }>(
-			"paraglide://locales/de/missing"
-		);
-		expect(de.missing).toBe(0);
-	});
-
-	it("reads a single message value", async () => {
-		const data = await readJsonResource<unknown>(
-			"paraglide://messages/en/greeting"
-		);
-		expect(data).toEqual({
-			key: "greeting",
-			locale: "en",
-			value: "Hello {name}!",
-		});
-	});
-
-	it("errors on an unknown message key resource", async () => {
-		await expect(
-			client.readResource({ uri: "paraglide://messages/en/nope_does_not_exist" })
-		).rejects.toThrow(/unknown message key/);
-	});
-
-	it("completes resource template variables from the project", async () => {
-		const locales = await client.complete({
-			ref: {
-				type: "ref/resource",
-				uri: "paraglide://messages/{locale}/{key}",
-			},
-			argument: { name: "locale", value: "d" },
-		});
-		expect(locales.completion.values).toEqual(["de"]);
-
-		const keys = await client.complete({
-			ref: {
-				type: "ref/resource",
-				uri: "paraglide://messages/{locale}/{key}",
-			},
-			argument: { name: "key", value: "checkout_" },
-		});
-		expect(keys.completion.values).toContain("checkout_title");
-	});
-
-	it("completes locale and prefix prompt arguments from the project", async () => {
-		const locales = await client.complete({
-			ref: { type: "ref/prompt", name: "translate_locale" },
-			argument: { name: "targetLocale", value: "d" },
-		});
-		expect(locales.completion.values).toEqual(["de"]);
-
-		const prefixes = await client.complete({
-			ref: { type: "ref/prompt", name: "review_locale" },
-			argument: { name: "prefix", value: "checkout_" },
-		});
-		expect(prefixes.completion.values).toContain("checkout_title");
-	});
-
-	// the mutation tests run last so the fixture state the tests above rely on
-	// (key set, missing counts) is not disturbed
-
-	it("renames a message across locales and writes to disk", async () => {
-		const result = await callTool<{
-			key: string;
-			newKey: string;
-			updatedLocales: string[];
-		}>("rename_message", { key: "checkout_title", newKey: "checkout_heading" });
-		expect(result.updatedLocales).toContain("en");
-		expect(result.updatedLocales).toContain("de");
-
-		const enFile = fixture.readMessages("en") as Record<string, unknown>;
-		expect(enFile.checkout_title).toBeUndefined();
-		expect(enFile.checkout_heading).toBe("Checkout");
-		const deFile = fixture.readMessages("de") as Record<string, unknown>;
-		// "DE2:" — the value last written by the retranslation test above
-		expect(deFile.checkout_heading).toBe("DE2:Checkout");
-	});
-
-	it("rejects a rename onto an existing key as a tool error", async () => {
-		const result = await client.callTool({
-			name: "rename_message",
-			arguments: { key: "greeting", newKey: "hello_world" },
-		});
-		expect(result.isError).toBe(true);
-	});
-
-	it("deletes messages from all locale files on disk", async () => {
-		const result = await callTool<{
-			deleted: number;
-			failed: number;
-			results: Array<{ key: string; status: string; error?: string }>;
-		}>("delete_messages", {
-			keys: ["checkout_button_cancel", "nope_does_not_exist"],
-		});
-		expect(result.deleted).toBe(1);
-		expect(result.failed).toBe(1);
-		expect(
-			result.results.find((r) => r.key === "nope_does_not_exist")?.error
-		).toContain("unknown message key");
-
-		for (const locale of ["en", "de"]) {
-			const file = fixture.readMessages(locale) as Record<string, unknown>;
-			expect(file.checkout_button_cancel).toBeUndefined();
-		}
-
-		const info = await callTool<{ totalKeys: number }>("project_info", {});
-		expect(info.totalKeys).toBe(5);
-	});
-
-	it("saves a source-diverging translation with skipValidation", async () => {
-		// the same value was rejected without the flag in the validation test above
-		const result = await callTool<{ saved: number; failed: number }>(
-			"save_translations",
-			{
-				targetLocale: "fr",
-				translations: [{ key: "greeting", value: "Bonjour {nom} !" }],
-				skipValidation: true,
-			}
-		);
-		expect(result.saved).toBe(1);
-		expect(result.failed).toBe(0);
-		expect(
-			(fixture.readMessages("fr") as Record<string, unknown>).greeting
-		).toBe("Bonjour {nom} !");
-	});
-
-	it("removes orphan messages from target locales", async () => {
-		const created = await callTool<{ saved: number; failed: number }>(
-			"save_translations",
-			{
-				targetLocale: "fr",
-				allowNewKeys: true,
-				translations: [{ key: "fr_orphan", value: "Orphelin" }],
-			}
-		);
-		expect(created.saved).toBe(1);
-		expect(created.failed).toBe(0);
-		expect(
-			(fixture.readMessages("fr") as Record<string, unknown>).fr_orphan
-		).toBe("Orphelin");
-
-		const removed = await callTool<{
-			deleted: number;
-			results: Array<{ locale: string; keys: string[] }>;
-		}>("remove_orphan_messages", { targetLocales: ["fr"] });
-		expect(removed.deleted).toBe(1);
-		expect(removed.results).toEqual([
-			{ locale: "fr", deleted: 1, keys: ["fr_orphan"] },
-		]);
-		expect(
-			(fixture.readMessages("fr") as Record<string, unknown>).fr_orphan
-		).toBeUndefined();
-	});
-
-	it("adds a locale, translates into it, and removes it again", async () => {
-		const added = await callTool<{
-			locale: string;
-			locales: string[];
-			messageFileCreated: boolean;
-		}>("add_locale", { locale: "es" });
-		expect(added.locales).toEqual(["en", "de", "fr", "es"]);
-		expect(added.messageFileCreated).toBe(true);
-
-		const save = await callTool<{ saved: number }>("save_translations", {
-			targetLocale: "es",
-			translations: [{ key: "greeting", value: "¡Hola {name}!" }],
-		});
-		expect(save.saved).toBe(1);
-		expect(
-			(fixture.readMessages("es") as Record<string, unknown>).greeting
-		).toBe("¡Hola {name}!");
-
-		const removed = await callTool<{
-			locales: string[];
-			discardedTranslations: number;
-			messageFileDeleted: boolean;
-		}>("remove_locale", { locale: "es" });
-		expect(removed.locales).toEqual(["en", "de", "fr"]);
-		expect(removed.discardedTranslations).toBe(1);
-		expect(removed.messageFileDeleted).toBe(true);
-
-		const info = await callTool<{ locales: string[] }>("project_info", {});
-		expect(info.locales).toEqual(["en", "de", "fr"]);
-	});
-
-	it("refuses to remove the base locale as a tool error", async () => {
-		const result = await client.callTool({
-			name: "remove_locale",
-			arguments: { locale: "en" },
-		});
-		expect(result.isError).toBe(true);
 	});
 });

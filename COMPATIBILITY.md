@@ -6,7 +6,7 @@ Which project setups paraglide-messages-mcp works with, and what to expect.
 
 | Your setup | Works? | Notes |
 | --- | --- | --- |
-| Paraglide JS default (`messages/{locale}.json`, message format plugin) | ✅ | The target setup — direct file access, works offline. |
+| Paraglide JS default (`messages/{locale}.json`, message format plugin) | ✅ | Direct file access; local inspection/saves work offline. Translation jobs use OpenAI. |
 | inlang message format with a custom `pathPattern` (single file per locale) | ✅ | Same path, any location, e.g. `./src/i18n/{locale}.json`. |
 | Message format plus `@inlang/plugin-m-function-matcher` | ✅ | Supported as a companion matcher; it does not change message file storage. |
 | inlang message format with multiple files per locale (`pathPattern` array) | ❌ | Requires the inlang SDK, which this server no longer ships. |
@@ -34,16 +34,15 @@ Earlier versions fell back to the inlang SDK for other plugins (i18next,
 next-intl, ICU) and multi-file `pathPattern` arrays. That fallback was
 dropped deliberately:
 
-- **Parallel-safety.** The server is built for one agent per locale running
-  concurrently (see [PERFORMANCE.md](PERFORMANCE.md)). Direct access reads
-  only the locales a call needs and writes only the target locale's file —
-  atomic, conflict-free. The SDK path rewrote *every* locale file on each
-  save, so concurrent per-locale agents would clobber each other.
+- **Scoped writes.** Direct access reads only the locales a call needs and
+  writes only the target locale's file. Batch collection validates against
+  the current snapshot and preserves concurrent edits. The SDK path rewrote
+  every locale file on each save.
 - **Speed.** Tool calls take single-digit milliseconds regardless of project
   size; the SDK's load/save cycle grew into seconds on large projects.
 - **Footprint.** Dropping `@inlang/sdk` removes the sqlite-wasm runtime and
   the bulk of the dependency tree, which makes `npx paraglide-messages-mcp` start
-  fast and work fully offline.
+  fast. Inspection and manual saves work offline; translation uses OpenAI.
 
 What you keep either way:
 
@@ -60,7 +59,8 @@ release that still shipped the SDK fallback, or file an issue.
 
 ## Other requirements
 
-- Node.js >= 20
+- Node.js >= 22.12
+- `OPENAI_API_KEY` and access to the configured model for translation jobs
 - The base locale's messages are the translation source, so it should be
   reasonably complete — messages with an empty base value are skipped by
-  `get_translation_batch`.
+  `start_translation_job`.

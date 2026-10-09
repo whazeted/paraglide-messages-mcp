@@ -1,4 +1,5 @@
-export { createServer, SERVER_VERSION, type ServerOptions } from "./server.js";
+export { createServer, createHandler, SERVER_VERSION, type ServerOptions } from "./server.js";
+export { BatchTranslationService, DEFAULT_MODEL, type BatchOptions, type StartTranslationArgs, type JobSummary } from "./core/batch.js";
 export { TranslationService } from "./core/service.js";
 export { discoverProjectPath } from "./core/project.js";
 export {

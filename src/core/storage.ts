@@ -5,6 +5,8 @@ import {
 	type DirectProject,
 } from "./direct.js";
 import type { LocaleMessages, MessagesSnapshot } from "./types.js";
+import path from "node:path";
+import { acquireLock } from "./durable.js";
 
 /** Everything an operation needs to know about the project, loaded fresh. */
 export interface ProjectSnapshot {
@@ -90,24 +92,27 @@ export function mutateKeys<T>(
 	plan: (context: ProjectSnapshot) => KeyMutationPlan<T>,
 	options?: ReadOptions
 ): T {
-	const project = parseDirectProject(projectPath);
-	const locales = scopedLocales(project, options);
-	const context: ProjectSnapshot = {
-		baseLocale: project.baseLocale,
-		locales: project.locales,
-		snapshot: readDirectSnapshot(project, locales),
-	};
-	const { deletions, localeDeletions, additions, result } = plan(context);
-	for (const locale of locales) {
-		mutateDirectLocale(
-			project,
-			locale,
-			context.snapshot[locale] ?? {},
-			additions[locale] ?? {},
-			[...deletions, ...(localeDeletions?.[locale] ?? [])]
-		);
-	}
-	return result;
+	const release = acquireLock(path.join(projectPath, ".paraglide-catalog.lock"));
+	try {
+		const project = parseDirectProject(projectPath);
+		const locales = scopedLocales(project, options);
+		const context: ProjectSnapshot = {
+			baseLocale: project.baseLocale,
+			locales: project.locales,
+			snapshot: readDirectSnapshot(project, locales),
+		};
+		const { deletions, localeDeletions, additions, result } = plan(context);
+		for (const locale of locales) {
+			mutateDirectLocale(
+				project,
+				locale,
+				context.snapshot[locale] ?? {},
+				additions[locale] ?? {},
+				[...deletions, ...(localeDeletions?.[locale] ?? [])]
+			);
+		}
+		return result;
+	} finally { release(); }
 }
 
 /** All message keys present in any loaded locale. */
